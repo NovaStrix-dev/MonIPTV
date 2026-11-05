@@ -44,6 +44,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -287,6 +291,8 @@ fun BrowseScreen(
     }
 
     val catNames = remember(categories) { categories.associate { it.id to it.name } }
+    // Nombre de titres par catégorie (affiché dans la liste déroulante des films).
+    val catCounts = remember(items) { items.groupingBy { it.categoryId }.eachCount() }
 
     // Nouveautés : les titres les plus récemment ajoutés (films et séries uniquement).
     val recent by produceState(initialValue = emptyList<Media>(), items, type) {
@@ -341,7 +347,16 @@ fun BrowseScreen(
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
-        if (query.isBlank()) {
+        if (query.isBlank() && type == ContentType.MOVIE) {
+            CategoryDropdown(
+                selected = cat,
+                categories = categories,
+                counts = catCounts,
+                watchingCount = watching.size,
+                recentCount = recent.size,
+                onSelect = { cat = it },
+            )
+        } else if (query.isBlank()) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -687,6 +702,77 @@ fun PosterRow(m: Media, subtitle: String?, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
             }
+        }
+    }
+}
+
+
+/** Choix de la catégorie des films sous forme de liste déroulante. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoryDropdown(
+    selected: String?,
+    categories: List<Category>,
+    counts: Map<String, Int>,
+    watchingCount: Int,
+    recentCount: Int,
+    onSelect: (String?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = when (selected) {
+        null -> "Toutes les catégories"
+        WATCH_CAT -> "En cours"
+        NEW_CAT -> "Nouveautés"
+        else -> categories.firstOrNull { it.id == selected }?.name ?: "Toutes les catégories"
+    }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+    ) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text("Catégorie") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, true),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            @Composable
+            fun option(id: String?, text: String, count: Int?, icon: ImageVector? = null) {
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontWeight = if (id == selected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (id == selected) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (count != null) {
+                                Text(
+                                    "$count",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 8.dp),
+                                )
+                            }
+                        }
+                    },
+                    leadingIcon = icon?.let { { Icon(it, null, Modifier.size(18.dp)) } },
+                    onClick = { onSelect(id); expanded = false },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+            option(null, "Toutes les catégories", null)
+            if (watchingCount > 0) option(WATCH_CAT, "En cours", watchingCount, Icons.Filled.History)
+            if (recentCount > 0) option(NEW_CAT, "Nouveautés", recentCount, Icons.Filled.NewReleases)
+            HorizontalDivider()
+            categories.forEach { c -> option(c.id, c.name, counts[c.id] ?: 0) }
         }
     }
 }
