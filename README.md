@@ -15,7 +15,7 @@
    > Si le dossier `.github` n'apparaît pas (fichier caché), créez à la main le fichier
    > `.github/workflows/build-apk.yml` via **Add file → Create new file** et collez-y son contenu.
 3. Onglet **Actions** : la compilation démarre seule (≈ 5 min). Quand elle est verte, ouvrez-la
-   et téléchargez **MonIPTV-apk** en bas de page (un .zip contenant `app-release.apk`).
+   et téléchargez **MonIPTV-apk** en bas de page (un .zip contenant `monIPTVperso.apk`).
 
 ## Obtenir l'APK — option 2 : Android Studio
 

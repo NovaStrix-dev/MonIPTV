@@ -1,3 +1,5 @@
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -34,6 +36,13 @@ android {
         }
         debug {
             signingConfig = signingConfigs.getByName("perso")
+        }
+    }
+
+    // Nom du fichier APK généré : monIPTVperso.apk
+    applicationVariants.all {
+        outputs.all {
+            (this as BaseVariantOutputImpl).outputFileName = "monIPTVperso.apk"
         }
     }
 
