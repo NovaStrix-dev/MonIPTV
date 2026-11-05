@@ -41,6 +41,22 @@ data class Episode(
     val icon: String?,
 )
 
+/** Fiche détaillée d'un film ou d'une série (Xtream uniquement, chargée à l'ouverture). */
+data class MediaDetails(
+    val plot: String?,
+    val year: String? = null,
+    val genre: String? = null,
+    val duration: String? = null,
+    val rating: String? = null,
+) {
+    /** « 2021 · Action, Aventure · 1 h 52 · ★ 7.4 » */
+    val facts: String get() = listOfNotNull(year, genre, duration, rating?.let { "★ $it" }).joinToString(" · ")
+    val isEmpty: Boolean get() = plot.isNullOrBlank() && facts.isEmpty()
+}
+
+/** Épisodes d'une série et sa fiche (résumé), obtenus en une seule requête. */
+data class SeriesInfo(val details: MediaDetails?, val episodes: List<Episode>)
+
 data class Catalog(
     val liveCats: List<Category>,
     val live: List<Media>,
@@ -66,3 +82,6 @@ fun queryWords(q: String): List<String> = normalizeText(q).split(wordSplit).filt
 
 /** Vrai si chaque mot recherché apparaît dans le titre (n'importe où, même au milieu). */
 fun Media.matches(words: List<String>): Boolean = words.all { searchKey.contains(it) }
+
+/** Tri du dernier ajouté au premier ; les titres sans date gardent leur ordre, après les titres datés. */
+fun List<Media>.newestFirst(): List<Media> = sortedByDescending { it.added }

@@ -94,11 +94,19 @@ object Repository {
         return "${s.trimEnd('/')}/get.php?username=$u&password=$p&type=m3u_plus&output=ts"
     }
 
-    suspend fun episodes(acc: Account, catalog: Catalog?, series: Media): List<Episode> =
+    suspend fun seriesInfo(acc: Account, catalog: Catalog?, series: Media): SeriesInfo =
         withContext(Dispatchers.IO) {
             when (acc.type) {
-                AccountType.XTREAM -> XtreamApi(acc).episodes(series.id)
-                AccountType.M3U -> catalog?.m3uEpisodes?.get(series.id) ?: emptyList()
+                AccountType.XTREAM -> XtreamApi(acc).seriesInfo(series.id)
+                AccountType.M3U -> SeriesInfo(null, catalog?.m3uEpisodes?.get(series.id) ?: emptyList())
             }
         }
+
+    /** Résumé d'un film (Xtream). Les playlists M3U n'en fournissent pas : null. */
+    suspend fun movieDetails(acc: Account, movie: Media): MediaDetails? = withContext(Dispatchers.IO) {
+        when (acc.type) {
+            AccountType.XTREAM -> XtreamApi(acc).movieDetails(movie.id)
+            AccountType.M3U -> null
+        }
+    }
 }

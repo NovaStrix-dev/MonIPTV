@@ -102,10 +102,47 @@ class XtreamApi(private val acc: Account) {
         )
     }
 
-    fun episodes(seriesId: String): List<Episode> {
+    /** Fiche d'un film : résumé, année, genre, durée, note. */
+    fun movieDetails(vodId: String): MediaDetails? {
+        val raw = api("get_vod_info", "&vod_id=$vodId").trim()
+        if (!raw.startsWith("{")) return null
+        val info = JSONObject(raw).optJSONObject("info") ?: return null
+        return details(info, duration = info.str("duration")?.let { formatDuration(it) })
+    }
+
+    private fun details(info: JSONObject, duration: String? = null): MediaDetails? {
+        val plot = info.str("plot") ?: info.str("description")
+        val year = (info.str("releasedate") ?: info.str("releaseDate") ?: info.str("release_date"))
+            ?.let { Regex("(19|20)\\d{2}").find(it)?.value }
+            ?: info.str("year")
+        val rating = info.str("rating")?.toDoubleOrNull()?.takeIf { it > 0 }?.let { "%.1f".format(java.util.Locale.US, it) }
+        val d = MediaDetails(
+            plot = plot,
+            year = year,
+            genre = info.str("genre"),
+            duration = duration,
+            rating = rating,
+        )
+        return if (d.isEmpty) null else d
+    }
+
+    /** « 01:52:10 » → « 1 h 52 » ; « 45:00 » → « 45 min ». */
+    private fun formatDuration(s: String): String? {
+        val parts = s.split(":").mapNotNull { it.trim().toIntOrNull() }
+        val minutes = when (parts.size) {
+            3 -> parts[0] * 60 + parts[1]
+            2 -> parts[0]
+            else -> return null
+        }
+        if (minutes <= 0) return null
+        return if (minutes >= 60) "${minutes / 60} h %02d".format(minutes % 60) else "$minutes min"
+    }
+
+    fun seriesInfo(seriesId: String): SeriesInfo {
         val raw = api("get_series_info", "&series_id=$seriesId").trim()
-        if (!raw.startsWith("{")) return emptyList()
+        if (!raw.startsWith("{")) return SeriesInfo(null, emptyList())
         val js = JSONObject(raw)
+        val det = js.optJSONObject("info")?.let { details(it) }
         val found = mutableListOf<JSONObject>()
         fun collect(a: JSONArray) {
             for (i in 0 until a.length()) {
@@ -115,11 +152,11 @@ class XtreamApi(private val acc: Account) {
                 }
             }
         }
-        when (val eps = js.opt("episodes")) {
-            is JSONObject -> eps.keys().forEach { k -> eps.optJSONArray(k)?.let { collect(it) } }
-            is JSONArray -> collect(eps)
+        when (val raw = js.opt("episodes")) {
+            is JSONObject -> raw.keys().forEach { k -> raw.optJSONArray(k)?.let { collect(it) } }
+            is JSONArray -> collect(raw)
         }
-        return found.mapNotNull { o ->
+        val eps = found.mapNotNull { o ->
             val id = o.str("id") ?: return@mapNotNull null
             val ext = o.str("container_extension") ?: "mp4"
             val num = o.optInt("episode_num", 0)
@@ -133,5 +170,6 @@ class XtreamApi(private val acc: Account) {
                 icon = o.optJSONObject("info")?.str("movie_image"),
             )
         }.sortedWith(compareBy({ it.season }, { it.number }))
+        return SeriesInfo(det, eps)
     }
 }

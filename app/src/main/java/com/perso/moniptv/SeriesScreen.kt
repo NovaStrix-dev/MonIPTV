@@ -21,6 +21,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Scaffold
@@ -42,13 +43,17 @@ import androidx.compose.ui.unit.dp
 fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
     val ctx = LocalContext.current
     var episodes by remember { mutableStateOf<List<Episode>?>(null) }
+    var details by remember { mutableStateOf<MediaDetails?>(null) }
+    var plotOpen by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var season by remember { mutableStateOf<Int?>(null) }
     var dlKeys by remember { mutableStateOf(vm.downloads.records().map { it.key }.toSet()) }
 
     LaunchedEffect(series.id) {
         try {
-            episodes = vm.episodes(series)
+            val info = vm.seriesInfo(series)
+            details = info.details
+            episodes = info.episodes
         } catch (e: Exception) {
             err = e.message ?: "Erreur de chargement"
         }
@@ -79,8 +84,26 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                     Row(Modifier.padding(12.dp)) {
                         Poster(series.icon, series.name, Modifier.width(90.dp))
                         Column(Modifier.padding(start = 12.dp)) {
-                            Text(series.name)
-                            Text("${seasons.size} saison(s) · ${eps.size} épisode(s)")
+                            Text(series.name, style = MaterialTheme.typography.titleMedium)
+                            Text("${seasons.size} saison(s) · ${eps.size} épisode(s)", style = MaterialTheme.typography.bodySmall)
+                            details?.facts?.takeIf { it.isNotEmpty() }?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            // Synopsis : 4 lignes, toucher pour tout lire.
+                            details?.plot?.takeIf { it.isNotBlank() }?.let { plot ->
+                                Text(
+                                    plot,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = if (plotOpen) Int.MAX_VALUE else 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 6.dp).clickable { plotOpen = !plotOpen },
+                                )
+                            }
                         }
                     }
                     if (seasons.size > 1) {

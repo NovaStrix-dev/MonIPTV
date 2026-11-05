@@ -44,6 +44,9 @@ la configuration (la clé de signature `app/moniptv.jks` est fixe — gardez-la)
 - **Avec un VPN** : l'appli contourne le filtre DNS des VPN et privilégie l'IPv4. Si la connexion échoue
   quand même alors qu'elle marche sans VPN, c'est que le fournisseur IPTV bloque les adresses du VPN :
   changez de pays/serveur dans le VPN, ou excluez MonIPTV du VPN (« tunnel fractionné » / *split tunneling*).
-- **Favoris** : touchez le cœur dans la fiche d'un film ou en haut de l'écran d'une série, ou faites un
-  appui long sur une affiche. Les favoris sont regroupés dans la catégorie **Favoris** des onglets Films et
+- **Favoris** : touchez le petit cœur en haut à droite d'une affiche (sans ouvrir la fiche), le cœur de la
+  fiche d'un film ou en haut de l'écran d'une série, ou faites un appui long sur une affiche. Les favoris sont regroupés dans la catégorie **Favoris** des onglets Films et
   Séries (et en tête de « Toutes »). Ils sont conservés même après « Changer de compte ».
+- **Synopsis** : la fiche d'un film et l'écran d'une série affichent le résumé, l'année, le genre, la durée
+  et la note (comptes Xtream Codes ; les playlists M3U ne fournissent pas de résumé).
+- **Tri** : films et séries sont rangés du dernier ajouté au premier, dans chaque catégorie et dans la recherche.

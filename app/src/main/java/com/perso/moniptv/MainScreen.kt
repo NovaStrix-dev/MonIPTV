@@ -84,6 +84,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.ImeAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -309,7 +318,8 @@ fun BrowseScreen(
         else -> emptyList()
     }
 
-    val catNames = remember(categories) { categories.associate { it.id to it.name } }
+    // Toutes les listes vont du dernier ajouté au premier (titres sans date à la fin, dans leur ordre).
+    val sorted = remember(items) { items.newestFirst() }
     // Nombre de titres par catégorie (affiché dans la liste déroulante des films).
     val catCounts = remember(items) { items.groupingBy { it.categoryId }.eachCount() }
 
@@ -330,7 +340,8 @@ fun BrowseScreen(
         }
     }
 
-    val sections by produceState<List<Section>?>(initialValue = null, items, query, cat, recent, favs) {
+    val sections by produceState<List<Section>?>(initialValue = null, sorted, query, cat, recent, favs) {
+        val items = sorted
         value = withContext(Dispatchers.Default) {
             val words = queryWords(query)
             when {
@@ -369,28 +380,33 @@ fun BrowseScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text("Rechercher…") },
-            leadingIcon = { Icon(Icons.Filled.Search, null) },
-            trailingIcon = {
-                if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, "Effacer") }
-            },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-        if (query.isBlank() && type == ContentType.MOVIE) {
-            CategoryDropdown(
-                selected = cat,
-                categories = categories,
-                counts = catCounts,
-                watchingCount = watching.size,
-                favCount = favs.size,
-                recentCount = recent.size,
-                onSelect = { cat = it },
+        // Recherche et catégorie sur une seule ligne compacte (40 dp) : accessibles mais discrètes.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CompactSearchField(
+                query = query,
+                onQueryChange = { query = it },
+                placeholder = "Rechercher…",
+                modifier = Modifier.weight(1f),
             )
-        } else if (query.isBlank()) {
+            if (query.isBlank() && type == ContentType.MOVIE) {
+                CategoryDropdown(
+                    selected = cat,
+                    categories = categories,
+                    counts = catCounts,
+                    watchingCount = watching.size,
+                    favCount = favs.size,
+                    recentCount = recent.size,
+                    onSelect = { cat = it },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        // Séries et TV : rangée de boutons de catégorie (les films ont la liste déroulante ci-dessus).
+        if (query.isBlank() && type != ContentType.MOVIE) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -452,8 +468,8 @@ fun BrowseScreen(
             list.all { it.items.isEmpty() } && shownWatching.isEmpty() -> CenterMessage(
                 when (cat) {
                     NEW_CAT -> "Aucune nouveauté pour le moment."
-                    FAV_CAT -> "Aucun favori pour l'instant.\n\nTouchez le cœur dans la fiche d'un film ou d'une série, " +
-                        "ou faites un appui long sur une affiche."
+                    FAV_CAT -> "Aucun favori pour l'instant.\n\nTouchez le petit cœur en haut à droite d'une affiche, " +
+                        "ou celui de la fiche d'un film ou d'une série."
                     else -> "Aucun résultat"
                 }
             )
@@ -507,7 +523,7 @@ fun BrowseScreen(
                         PosterCard(
                             m, subtitle,
                             favorite = vm.isFavorite(m),
-                            onLongClick = { toggleFavoriteWithToast(ctx, vm, m) },
+                            onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) },
                         ) {
                             if (type == ContentType.SERIES) onOpenSeries(m) else selectedMovie = m
                         }
@@ -603,13 +619,19 @@ fun formatTime(ms: Long): String {
     return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
 }
 
-/** Fenêtre d'un film : Lire ou Télécharger. */
+/** Fiche d'un film : synopsis, Lire ou Télécharger, favori. */
 @Composable
 fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     val key = "movie:${m.stableKey}"
     val already = remember(m) { vm.downloads.isDownloaded(key) }
     val inProgress = remember(m, vm.watching) { vm.watching.firstOrNull { it.meta.key == key } }
+    var details by remember(m) { mutableStateOf<MediaDetails?>(null) }
+    var loadingDetails by remember(m) { mutableStateOf(vm.account?.type == AccountType.XTREAM) }
+    LaunchedEffect(m) {
+        details = vm.movieDetails(m)
+        loadingDetails = false
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -619,21 +641,46 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
             }
         },
         text = {
-            Row {
-                Poster(m.icon, m.name, Modifier.width(90.dp))
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(
-                        if (already) "Ce film est dans vos téléchargements (onglet Hors ligne)."
-                        else "Regarder maintenant ou télécharger pour plus tard ?"
-                    )
-                    if (inProgress != null) {
-                        Spacer(Modifier.height(8.dp))
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Row {
+                    Poster(m.icon, m.name, Modifier.width(90.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        details?.facts?.takeIf { it.isNotEmpty() }?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
                         Text(
-                            "Déjà commencé : reprise à ${formatTime(inProgress.position)}.",
+                            if (already) "Ce film est dans vos téléchargements (onglet Hors ligne)."
+                            else "Regarder maintenant ou télécharger pour plus tard ?",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
                         )
+                        if (inProgress != null) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Déjà commencé : reprise à ${formatTime(inProgress.position)}.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+                // Synopsis (chargé à l'ouverture de la fiche).
+                when {
+                    loadingDetails -> Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Chargement du résumé…", style = MaterialTheme.typography.bodySmall)
+                    }
+                    !details?.plot.isNullOrBlank() -> {
+                        Spacer(Modifier.height(12.dp))
+                        Text("Synopsis", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(4.dp))
+                        Text(details?.plot ?: "", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -717,7 +764,8 @@ fun SectionHeader(title: String, onSeeAll: (() -> Unit)? = null) {
 
 /**
  * Case de la grille : l'affiche, puis le titre dessous (et la date d'ajout pour les nouveautés).
- * Un cœur en haut à droite signale un favori ; l'appui long ajoute ou retire des favoris.
+ * Un cœur en haut à droite de l'affiche ajoute ou retire le titre des favoris d'un simple toucher
+ * (plein et rouge = favori, contour discret sinon). L'appui long sur l'affiche fait la même chose.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -725,19 +773,30 @@ fun PosterCard(
     m: Media,
     subtitle: String?,
     favorite: Boolean = false,
-    onLongClick: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onToggleFavorite)) {
         Box {
             Poster(m.icon, m.name, Modifier.fillMaxWidth())
-            if (favorite) {
+            if (onToggleFavorite != null || favorite) {
+                // Zone tactile de 40 dp, pastille visible de 26 dp.
                 Box(
-                    Modifier.align(Alignment.TopEnd).padding(4.dp).size(24.dp)
-                        .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.55f)),
+                    Modifier.align(Alignment.TopEnd).size(40.dp)
+                        .then(if (onToggleFavorite != null) Modifier.clickable(onClick = onToggleFavorite) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.Favorite, "Favori", tint = Color(0xFFFF5A6E), modifier = Modifier.size(15.dp))
+                    Box(
+                        Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
+                            tint = if (favorite) FAV_RED else Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
             }
         }
@@ -761,6 +820,9 @@ fun PosterCard(
         }
     }
 }
+
+/** Rouge des cœurs de favoris. */
+val FAV_RED = Color(0xFFFF5A6E)
 
 /** Ligne de liste : affiche à gauche, titre et sous-titre (catégorie ou date d'ajout). */
 @Composable
@@ -786,7 +848,7 @@ fun PosterRow(m: Media, subtitle: String?, onClick: () -> Unit) {
 }
 
 
-/** Choix de la catégorie des films sous forme de liste déroulante. */
+/** Choix de la catégorie des films : pastille compacte qui ouvre une liste déroulante. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CategoryDropdown(
@@ -797,30 +859,49 @@ private fun CategoryDropdown(
     favCount: Int,
     recentCount: Int,
     onSelect: (String?) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val label = when (selected) {
-        null -> "Toutes les catégories"
+        null -> "Toutes"
         WATCH_CAT -> "En cours"
         FAV_CAT -> "Favoris"
         NEW_CAT -> "Nouveautés"
-        else -> categories.firstOrNull { it.id == selected }?.name ?: "Toutes les catégories"
+        else -> categories.firstOrNull { it.id == selected }?.name ?: "Toutes"
     }
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = it },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        modifier = modifier,
     ) {
-        OutlinedTextField(
-            value = label,
-            onValueChange = {},
-            readOnly = true,
-            singleLine = true,
-            label = { Text("Catégorie") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, true),
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        Row(
+            Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
+                .padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.FilterList, "Catégorie", Modifier.size(18.dp),
+                tint = if (selected != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+        }
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            matchTextFieldWidth = false,
+            modifier = Modifier.width(280.dp),
+        ) {
             @Composable
             fun option(id: String?, text: String, count: Int?, icon: ImageVector? = null) {
                 DropdownMenuItem(
@@ -866,7 +947,60 @@ fun FavoriteButton(favorite: Boolean, onClick: () -> Unit) {
         Icon(
             if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
             contentDescription = if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
-            tint = if (favorite) Color(0xFFFF5A6E) else MaterialTheme.colorScheme.onSurface,
+            tint = if (favorite) FAV_RED else MaterialTheme.colorScheme.onSurface,
         )
     }
+}
+
+/** Champ de recherche compact (40 dp de haut, coins arrondis), loupe et bouton d'effacement. */
+@Composable
+fun CompactSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    fieldModifier: Modifier = Modifier,
+    onSearch: (() -> Unit)? = null,
+) {
+    val color = MaterialTheme.colorScheme.onSurface
+    BasicTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = color),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSearch?.invoke() }),
+        modifier = modifier.then(fieldModifier),
+        decorationBox = { inner ->
+            Row(
+                Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(start = 12.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Search, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.weight(1f)) {
+                    if (query.isEmpty()) {
+                        Text(
+                            placeholder,
+                            maxLines = 1,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    inner()
+                }
+                if (query.isNotEmpty()) {
+                    Box(
+                        Modifier.size(32.dp).clip(RoundedCornerShape(16.dp)).clickable { onQueryChange("") },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Clear, "Effacer", Modifier.size(18.dp))
+                    }
+                }
+            }
+        },
+    )
 }

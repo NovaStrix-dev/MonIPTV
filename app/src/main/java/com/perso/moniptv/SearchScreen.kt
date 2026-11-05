@@ -66,8 +66,8 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
             val words = queryWords(query)
             if (words.isEmpty()) Results(emptyList(), emptyList())
             else Results(
-                catalog.movies.filter { it.matches(words) }.sortedBy { it.name.length },
-                catalog.series.filter { it.matches(words) }.sortedBy { it.name.length },
+                catalog.movies.filter { it.matches(words) }.newestFirst(),
+                catalog.series.filter { it.matches(words) }.newestFirst(),
             )
         }
     }
@@ -78,18 +78,13 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
     val showSeries = scope != Scope.MOVIES
 
     Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text("Un mot du titre…") },
-            leadingIcon = { Icon(Icons.Filled.Search, null) },
-            trailingIcon = {
-                if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, "Effacer") }
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).focusRequester(focus),
+        CompactSearchField(
+            query = query,
+            onQueryChange = { query = it },
+            placeholder = "Un mot du titre…",
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            fieldModifier = Modifier.focusRequester(focus),
+            onSearch = { keyboard?.hide() },
         )
         Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Scope.entries.forEach { s ->
@@ -110,11 +105,11 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
             ) {
                 if (showMovies && results.movies.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Films (${results.movies.size})") }
-                    items(results.movies) { m -> PosterCard(m, movieCats[m.categoryId], vm.isFavorite(m), { toggleFavoriteWithToast(ctx, vm, m) }) { selectedMovie = m } }
+                    items(results.movies) { m -> PosterCard(m, movieCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }) { selectedMovie = m } }
                 }
                 if (showSeries && results.series.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Séries (${results.series.size})") }
-                    items(results.series) { m -> PosterCard(m, seriesCats[m.categoryId], vm.isFavorite(m), { toggleFavoriteWithToast(ctx, vm, m) }) { onOpenSeries(m) } }
+                    items(results.series) { m -> PosterCard(m, seriesCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }) { onOpenSeries(m) } }
                 }
             }
         }

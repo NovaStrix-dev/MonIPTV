@@ -152,9 +152,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         error = null
     }
 
-    suspend fun episodes(series: Media): List<Episode> {
-        val acc = account ?: return emptyList()
-        return Repository.episodes(acc, catalog, series)
+    suspend fun seriesInfo(series: Media): SeriesInfo {
+        val acc = account ?: return SeriesInfo(null, emptyList())
+        return Repository.seriesInfo(acc, catalog, series).also { info ->
+            info.details?.let { detailsCache[Favorites.key(series)] = it }
+        }
+    }
+
+    /** Fiches déjà chargées pendant cette session (évite de redemander au serveur). */
+    private val detailsCache = HashMap<String, MediaDetails>()
+
+    /** Résumé d'un film ; null si indisponible (M3U, hors ligne, serveur sans fiche). */
+    suspend fun movieDetails(movie: Media): MediaDetails? {
+        detailsCache[Favorites.key(movie)]?.let { return it }
+        val acc = account ?: return null
+        val d = runCatching { Repository.movieDetails(acc, movie) }.getOrNull() ?: return null
+        detailsCache[Favorites.key(movie)] = d
+        return d
     }
 
     private fun friendly(e: Exception): String {
