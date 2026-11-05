@@ -2,8 +2,10 @@ package com.perso.moniptv
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.NewReleases
@@ -64,6 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -89,6 +93,12 @@ enum class Tab(val label: String, val icon: ImageVector) {
 
 /** Identifiant interne de la catégorie « Nouveautés ». */
 private const val NEW_CAT = "__nouveautes__"
+
+/** Identifiant interne de la catégorie « En cours ». */
+private const val WATCH_CAT = "__en_cours__"
+
+/** Nombre de titres « En cours » montrés en tête de la vue « Toutes » (2 lignes de 3). */
+private const val WATCH_PREVIEW = 6
 
 /** Nombre de titres listés dans « Nouveautés ». */
 private const val NEW_LIMIT = 200
@@ -215,7 +225,7 @@ fun MainScreen(vm: AppViewModel) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
             title = { Text("Changer de compte ?") },
-            text = { Text("Les identifiants enregistrés seront effacés. Les fichiers téléchargés sont conservés.") },
+            text = { Text("Les identifiants enregistrés et la liste « En cours » seront effacés. Les fichiers téléchargés sont conservés.") },
             confirmButton = { TextButton(onClick = { confirmLogout = false; vm.logout() }) { Text("Déconnecter") } },
             dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Annuler") } },
         )
@@ -260,7 +270,21 @@ fun BrowseScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var cat by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedMovie by remember { mutableStateOf<Media?>(null) }
+    var watchMenu by remember { mutableStateOf<WatchEntry?>(null) }
     val listState = rememberLazyListState()
+
+    // « En cours » : films ou épisodes commencés, pour cet onglet.
+    val watching = remember(vm.watching, type) {
+        if (type == ContentType.LIVE) emptyList() else vm.watching.filter { it.meta.type == type }
+    }
+    // Si la liste « En cours » se vide pendant qu'on la regarde, on revient à « Toutes ».
+    LaunchedEffect(watching.isEmpty()) { if (watching.isEmpty() && cat == WATCH_CAT) cat = null }
+    val shownWatching = when {
+        query.isNotBlank() -> emptyList()
+        cat == WATCH_CAT -> watching
+        cat == null -> watching.take(WATCH_PREVIEW)
+        else -> emptyList()
+    }
 
     val catNames = remember(categories) { categories.associate { it.id to it.name } }
 
@@ -276,6 +300,7 @@ fun BrowseScreen(
             val words = queryWords(query)
             when {
                 words.isNotEmpty() -> listOf(Section("", items.filter { it.matches(words) }))
+                cat == WATCH_CAT -> emptyList()
                 cat == NEW_CAT -> listOf(Section("", recent, showDates = true))
                 cat != null -> listOf(Section("", items.filter { it.categoryId == cat }))
                 type == ContentType.LIVE -> listOf(Section("", items))
@@ -322,6 +347,16 @@ fun BrowseScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item { FilterChip(selected = cat == null, onClick = { cat = null }, label = { Text("Toutes") }) }
+                if (watching.isNotEmpty()) {
+                    item {
+                        FilterChip(
+                            selected = cat == WATCH_CAT,
+                            onClick = { cat = WATCH_CAT },
+                            label = { Text("En cours") },
+                            leadingIcon = { Icon(Icons.Filled.History, null, Modifier.size(18.dp)) },
+                        )
+                    }
+                }
                 if (recent.isNotEmpty()) {
                     item {
                         FilterChip(
@@ -343,7 +378,7 @@ fun BrowseScreen(
         }
 
         val list = sections
-        val total = list?.filter { it.seeAll == null }?.sumOf { it.items.size } ?: 0
+        val total = if (cat == WATCH_CAT) watching.size else list?.filter { it.seeAll == null }?.sumOf { it.items.size } ?: 0
         Text(
             buildString {
                 append("$total titre(s)")
@@ -355,7 +390,7 @@ fun BrowseScreen(
 
         when {
             list == null -> CenterMessage("", loading = true)
-            list.all { it.items.isEmpty() } -> CenterMessage(
+            list.all { it.items.isEmpty() } && shownWatching.isEmpty() -> CenterMessage(
                 if (cat == NEW_CAT) "Aucune nouveauté pour le moment." else "Aucun résultat"
             )
             type == ContentType.LIVE -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
@@ -373,6 +408,23 @@ fun BrowseScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
+                if (shownWatching.isNotEmpty()) {
+                    if (cat != WATCH_CAT) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SectionHeader(
+                                "En cours",
+                                onSeeAll = if (watching.size > WATCH_PREVIEW) ({ cat = WATCH_CAT }) else null,
+                            )
+                        }
+                    }
+                    gridItems(shownWatching, key = { "w:" + it.meta.key }) { e ->
+                        WatchCard(
+                            e,
+                            onClick = { vm.play(ctx, e.meta) },
+                            onLongClick = { watchMenu = e },
+                        )
+                    }
+                }
                 list.forEach { s ->
                     if (s.title.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -398,6 +450,89 @@ fun BrowseScreen(
     }
 
     selectedMovie?.let { m -> MovieDialog(vm, m) { selectedMovie = null } }
+
+    watchMenu?.let { e ->
+        val series = if (e.meta.seriesId != null) items.firstOrNull { it.id == e.meta.seriesId } else null
+        WatchMenuDialog(
+            e,
+            onResume = { watchMenu = null; vm.play(ctx, e.meta) },
+            onOpenSeries = series?.let { s -> { watchMenu = null; onOpenSeries(s) } },
+            onRemove = { watchMenu = null; vm.removeWatching(e.meta.key) },
+            onDismiss = { watchMenu = null },
+        )
+    }
+}
+
+/** Menu d'un titre « En cours » (appui long) : reprendre, voir la série, retirer. */
+@Composable
+fun WatchMenuDialog(
+    e: WatchEntry,
+    onResume: () -> Unit,
+    onOpenSeries: (() -> Unit)?,
+    onRemove: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(e.meta.title) },
+        text = {
+            Column {
+                e.meta.subtitle?.let { Text(it) }
+                Text("Arrêté à ${formatTime(e.position)}" + if (e.duration > 0) " sur ${formatTime(e.duration)}" else "")
+                Spacer(Modifier.height(8.dp))
+                if (onOpenSeries != null) {
+                    TextButton(onClick = onOpenSeries) { Text("Voir la série") }
+                }
+                TextButton(onClick = onRemove) { Text("Retirer de « En cours »") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onResume) { Text("Reprendre") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
+    )
+}
+
+/** Case « En cours » : l'affiche avec une barre de progression, le titre et le temps restant. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun WatchCard(e: WatchEntry, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+        Box {
+            Poster(e.meta.icon, e.meta.title, Modifier.fillMaxWidth())
+            LinearProgressIndicator(
+                progress = { e.progress },
+                modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(4.dp),
+                trackColor = Color.Black.copy(alpha = 0.55f),
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            e.meta.title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        val info = listOfNotNull(
+            e.meta.subtitle?.substringBefore(" · "),
+            if (e.duration > 0) "reste ${e.remainingMin} min" else formatTime(e.position),
+        ).joinToString(" · ")
+        Text(
+            info,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+    }
+}
+
+/** 1:02:03 ou 12:34. */
+fun formatTime(ms: Long): String {
+    val t = (ms / 1000).coerceAtLeast(0)
+    val h = t / 3600
+    val m = (t % 3600) / 60
+    val sec = t % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
 }
 
 /** Fenêtre d'un film : Lire ou Télécharger. */
@@ -406,6 +541,7 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     val key = "movie:${m.stableKey}"
     val already = remember(m) { vm.downloads.isDownloaded(key) }
+    val inProgress = remember(m, vm.watching) { vm.watching.firstOrNull { it.meta.key == key } }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(m.name) },
@@ -413,17 +549,27 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
             Row {
                 Poster(m.icon, m.name, Modifier.width(90.dp))
                 Spacer(Modifier.width(12.dp))
-                Text(
-                    if (already) "Ce film est dans vos téléchargements (onglet Hors ligne)."
-                    else "Regarder maintenant ou télécharger pour plus tard ?"
-                )
+                Column {
+                    Text(
+                        if (already) "Ce film est dans vos téléchargements (onglet Hors ligne)."
+                        else "Regarder maintenant ou télécharger pour plus tard ?"
+                    )
+                    if (inProgress != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Déjà commencé : reprise à ${formatTime(inProgress.position)}.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = {
                 onDismiss()
-                m.url?.let { PlayerActivity.start(ctx, it, m.name, live = false) }
-            }) { Text("Lire") }
+                m.watchMeta()?.let { vm.play(ctx, it) }
+            }) { Text(if (inProgress != null) "Reprendre" else "Lire") }
         },
         dismissButton = {
             if (!already) {
