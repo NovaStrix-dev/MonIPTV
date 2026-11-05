@@ -25,6 +25,8 @@ object Http {
 
     val client: OkHttpClient = OkHttpClient.Builder()
         .dns(SmartDns)
+        // Secours par la pile réseau d'Android (celle des téléchargements), voir SystemNetwork.
+        .addInterceptor(SystemNetwork)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(180, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)

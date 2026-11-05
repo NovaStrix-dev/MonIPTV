@@ -171,7 +171,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return d
     }
 
-    private fun friendly(e: Exception): String {
+    /** L'utilisateur a choisi de faire passer MonIPTV à côté du VPN. */
+    var bypassVpn by mutableStateOf(SystemNetwork.bypassVpn)
+        private set
+
+    fun vpnActive(): Boolean = Http.isVpnActive(ctx)
+
+    fun setBypassVpn(on: Boolean) {
+        SystemNetwork.bypassVpn = on
+        bypassVpn = on
+    }
+
+    private fun friendly(e: Exception): String = friendlyBase(e) + "\n\nDétail : " + SystemNetwork.describe(e)
+
+    private fun friendlyBase(e: Exception): String {
         val base = when (e) {
             is UnknownHostException -> "Serveur introuvable (vérifiez l'adresse ou la connexion Internet)"
             is ConnectException -> "Impossible de joindre le serveur"
@@ -189,6 +202,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!Http.isVpnActive(ctx)) return base
         return base + "\n\nUn VPN est actif. Si tout marche sans lui, le fournisseur IPTV bloque " +
             "probablement les adresses de ce VPN : essayez un autre pays ou serveur dans le VPN, " +
-            "ou excluez MonIPTV du VPN (option « tunnel fractionné » ou « split tunneling » de l'appli VPN)."
+            "ou excluez MonIPTV du VPN (option « tunnel fractionné » ou « split tunneling » de l'appli VPN), " +
+            "ou touchez « Contourner le VPN pour MonIPTV »."
     }
 }

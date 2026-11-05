@@ -41,9 +41,12 @@ la configuration (la clé de signature `app/moniptv.jks` est fixe — gardez-la)
 - **Sous-titres** : pendant une vidéo, touchez l'écran puis « Style des sous-titres » (en haut à droite)
   pour choisir la taille, la couleur, le contour ou le fond, la position et le gras. Le réglage est gardé
   pour toutes les vidéos.
-- **Avec un VPN** : l'appli contourne le filtre DNS des VPN et privilégie l'IPv4. Si la connexion échoue
-  quand même alors qu'elle marche sans VPN, c'est que le fournisseur IPTV bloque les adresses du VPN :
-  changez de pays/serveur dans le VPN, ou excluez MonIPTV du VPN (« tunnel fractionné » / *split tunneling*).
+- **Avec un VPN** : quand un VPN est actif, l'appli passe par la pile réseau standard d'Android (la même que
+  les téléchargements). Si ça échoue encore, le message d'erreur propose **« Contourner le VPN pour MonIPTV »** :
+  l'appli utilise alors directement le Wi-Fi ou les données mobiles (les autres applis restent dans le VPN).
+  Une ligne discrète le rappelle ; la toucher arrête le contournement. Si l'appli VPN interdit ce contournement,
+  excluez MonIPTV dans ses réglages (« tunnel fractionné » / *split tunneling*). Les messages d'erreur affichent
+  un « Détail » technique : envoyez-en une capture en cas de souci.
 - **Favoris** : touchez le petit cœur en haut à droite d'une affiche (sans ouvrir la fiche), le cœur de la
   fiche d'un film ou en haut de l'écran d'une série, ou faites un appui long sur une affiche. Les favoris sont regroupés dans la catégorie **Favoris** des onglets Films et
   Séries (et en tête de « Toutes »). Ils sont conservés même après « Changer de compte ».

@@ -101,7 +101,10 @@ fun LoginScreen(vm: AppViewModel) {
                 )
             }
 
-            vm.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            vm.error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error)
+                VpnBypassButton(vm, onEnabled = { vm.login(Account(type, server, user, pass)) })
+            }
 
             val canSubmit = !vm.loading && server.isNotBlank() &&
                 (!xtream || (user.isNotBlank() && pass.isNotBlank()))

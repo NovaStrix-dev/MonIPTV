@@ -12,6 +12,11 @@ import coil.memory.MemoryCache
  * et hors ligne des affiches déjà vues.
  */
 class App : Application(), ImageLoaderFactory {
+    override fun onCreate() {
+        super.onCreate()
+        SystemNetwork.init(this)
+    }
+
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .okHttpClient {
             Http.client.newBuilder()

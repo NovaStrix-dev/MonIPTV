@@ -223,7 +223,9 @@ fun MainScreen(vm: AppViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.fillMaxWidth().clickable { vm.error = null }.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
+                VpnBypassButton(vm)
             }
+            VpnBypassNotice(vm)
             when {
                 tab == Tab.DOWNLOADS -> DownloadsScreen(vm)
                 c == null -> Column(
@@ -243,6 +245,7 @@ fun MainScreen(vm: AppViewModel) {
                         )
                         Spacer(Modifier.height(16.dp))
                         TextButton(onClick = { vm.refresh() }) { Text("Réessayer") }
+                        if (vm.error != null) VpnBypassButton(vm)
                     }
                 }
                 tab == Tab.LIVE -> BrowseScreen(vm, c.liveCats, c.live, ContentType.LIVE, c.updatedAt) {}
@@ -1002,5 +1005,46 @@ fun CompactSearchField(
                 }
             }
         },
+    )
+}
+
+/** Proposé après une erreur quand un VPN est actif : faire passer MonIPTV à côté du VPN (issue #6). */
+@Composable
+fun VpnBypassButton(vm: AppViewModel, onEnabled: () -> Unit = { vm.refresh() }) {
+    if (vm.bypassVpn || !vm.vpnActive()) return
+    var confirm by remember { mutableStateOf(false) }
+    TextButton(onClick = { confirm = true }, modifier = Modifier.padding(horizontal = 4.dp)) {
+        Text("Contourner le VPN pour MonIPTV")
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Contourner le VPN ?") },
+            text = {
+                Text(
+                    "MonIPTV utilisera directement le Wi-Fi ou les données mobiles, sans passer par le VPN " +
+                        "(comme les téléchargements). Les autres applis restent protégées par le VPN. " +
+                        "Votre fournisseur IPTV verra votre adresse réelle.\n\n" +
+                        "Certaines applis VPN interdisent ce contournement : dans ce cas, excluez MonIPTV " +
+                        "dans les réglages du VPN (« tunnel fractionné »)."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirm = false; vm.setBypassVpn(true); onEnabled() }) { Text("Contourner") }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Annuler") } },
+        )
+    }
+}
+
+/** Rappel discret quand le contournement du VPN est activé, avec la possibilité de l'arrêter. */
+@Composable
+fun VpnBypassNotice(vm: AppViewModel) {
+    if (!vm.bypassVpn || !vm.vpnActive()) return
+    Text(
+        "MonIPTV passe à côté du VPN · toucher pour arrêter",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        modifier = Modifier.fillMaxWidth().clickable { vm.setBypassVpn(false) }.padding(horizontal = 14.dp, vertical = 2.dp),
     )
 }

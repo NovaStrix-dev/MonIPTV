@@ -187,7 +187,7 @@ class PlayerActivity : ComponentActivity() {
                     } else ""
                     Toast.makeText(
                         this@PlayerActivity,
-                        "Lecture impossible (${error.errorCodeName})$hint",
+                        "Lecture impossible (${error.errorCodeName})$hint\nDétail : ${SystemNetwork.describe(error)}",
                         Toast.LENGTH_LONG,
                     ).show()
                 }
