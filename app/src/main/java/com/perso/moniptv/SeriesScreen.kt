@@ -61,6 +61,9 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
                 },
+                actions = {
+                    FavoriteButton(vm.isFavorite(series)) { toggleFavoriteWithToast(ctx, vm, series) }
+                },
             )
         },
     ) { pad ->

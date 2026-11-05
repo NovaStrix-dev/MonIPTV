@@ -1,5 +1,6 @@
 package com.perso.moniptv
 
+import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
@@ -100,6 +103,22 @@ private const val NEW_CAT = "__nouveautes__"
 
 /** Identifiant interne de la catégorie « En cours ». */
 private const val WATCH_CAT = "__en_cours__"
+
+/** Identifiant interne de la catégorie « Favoris ». */
+private const val FAV_CAT = "__favoris__"
+
+/** Nombre de favoris montrés en tête de la vue « Toutes » avant « Tout voir ». */
+private const val FAV_PREVIEW = 12
+
+/** Ajoute ou retire un titre des favoris et le confirme par un message bref. */
+fun toggleFavoriteWithToast(ctx: Context, vm: AppViewModel, m: Media) {
+    val added = vm.toggleFavorite(m)
+    Toast.makeText(
+        ctx,
+        if (added) "« ${m.name} » ajouté aux favoris" else "« ${m.name} » retiré des favoris",
+        Toast.LENGTH_SHORT,
+    ).show()
+}
 
 /** Nombre de titres « En cours » montrés en tête de la vue « Toutes » (2 lignes de 3). */
 private const val WATCH_PREVIEW = 6
@@ -229,7 +248,7 @@ fun MainScreen(vm: AppViewModel) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
             title = { Text("Changer de compte ?") },
-            text = { Text("Les identifiants enregistrés et la liste « En cours » seront effacés. Les fichiers téléchargés sont conservés.") },
+            text = { Text("Les identifiants enregistrés et la liste « En cours » seront effacés. Les favoris et les fichiers téléchargés sont conservés.") },
             confirmButton = { TextButton(onClick = { confirmLogout = false; vm.logout() }) { Text("Déconnecter") } },
             dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Annuler") } },
         )
@@ -301,18 +320,32 @@ fun BrowseScreen(
         }
     }
 
-    val sections by produceState<List<Section>?>(initialValue = null, items, query, cat, recent) {
+    // Favoris de cet onglet, du dernier ajouté au plus ancien.
+    val favs by produceState(initialValue = emptyList<Media>(), items, type, vm.favorites) {
+        val marks = vm.favorites
+        value = if (type == ContentType.LIVE || marks.isEmpty()) emptyList() else withContext(Dispatchers.Default) {
+            items.mapNotNull { m -> marks[Favorites.key(m)]?.let { m to it } }
+                .sortedByDescending { it.second }
+                .map { it.first }
+        }
+    }
+
+    val sections by produceState<List<Section>?>(initialValue = null, items, query, cat, recent, favs) {
         value = withContext(Dispatchers.Default) {
             val words = queryWords(query)
             when {
                 words.isNotEmpty() -> listOf(Section("", items.filter { it.matches(words) }))
                 cat == WATCH_CAT -> emptyList()
                 cat == NEW_CAT -> listOf(Section("", recent, showDates = true))
+                cat == FAV_CAT -> listOf(Section("", favs))
                 cat != null -> listOf(Section("", items.filter { it.categoryId == cat }))
                 type == ContentType.LIVE -> listOf(Section("", items))
                 else -> {
-                    // « Toutes » : films / séries rangés par catégorie, Nouveautés en tête.
+                    // « Toutes » : films / séries rangés par catégorie, Favoris et Nouveautés en tête.
                     val out = ArrayList<Section>()
+                    if (favs.isNotEmpty()) {
+                        out.add(Section("Favoris", favs.take(FAV_PREVIEW), seeAll = FAV_CAT))
+                    }
                     if (recent.isNotEmpty()) {
                         out.add(Section("Nouveautés", recent.take(NEW_PREVIEW), seeAll = NEW_CAT, showDates = true))
                     }
@@ -353,6 +386,7 @@ fun BrowseScreen(
                 categories = categories,
                 counts = catCounts,
                 watchingCount = watching.size,
+                favCount = favs.size,
                 recentCount = recent.size,
                 onSelect = { cat = it },
             )
@@ -369,6 +403,16 @@ fun BrowseScreen(
                             onClick = { cat = WATCH_CAT },
                             label = { Text("En cours") },
                             leadingIcon = { Icon(Icons.Filled.History, null, Modifier.size(18.dp)) },
+                        )
+                    }
+                }
+                if (type != ContentType.LIVE) {
+                    item {
+                        FilterChip(
+                            selected = cat == FAV_CAT,
+                            onClick = { cat = FAV_CAT },
+                            label = { Text("Favoris") },
+                            leadingIcon = { Icon(Icons.Filled.Favorite, null, Modifier.size(18.dp)) },
                         )
                     }
                 }
@@ -406,7 +450,12 @@ fun BrowseScreen(
         when {
             list == null -> CenterMessage("", loading = true)
             list.all { it.items.isEmpty() } && shownWatching.isEmpty() -> CenterMessage(
-                if (cat == NEW_CAT) "Aucune nouveauté pour le moment." else "Aucun résultat"
+                when (cat) {
+                    NEW_CAT -> "Aucune nouveauté pour le moment."
+                    FAV_CAT -> "Aucun favori pour l'instant.\n\nTouchez le cœur dans la fiche d'un film ou d'une série, " +
+                        "ou faites un appui long sur une affiche."
+                    else -> "Aucun résultat"
+                }
             )
             type == ContentType.LIVE -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 items(list.flatMap { it.items }) { m ->
@@ -455,7 +504,11 @@ fun BrowseScreen(
                         } else {
                             null
                         }
-                        PosterCard(m, subtitle) {
+                        PosterCard(
+                            m, subtitle,
+                            favorite = vm.isFavorite(m),
+                            onLongClick = { toggleFavoriteWithToast(ctx, vm, m) },
+                        ) {
                             if (type == ContentType.SERIES) onOpenSeries(m) else selectedMovie = m
                         }
                     }
@@ -559,7 +612,12 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
     val inProgress = remember(m, vm.watching) { vm.watching.firstOrNull { it.meta.key == key } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(m.name) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(m.name, Modifier.weight(1f))
+                FavoriteButton(vm.isFavorite(m)) { toggleFavoriteWithToast(ctx, vm, m) }
+            }
+        },
         text = {
             Row {
                 Poster(m.icon, m.name, Modifier.width(90.dp))
@@ -657,11 +715,32 @@ fun SectionHeader(title: String, onSeeAll: (() -> Unit)? = null) {
     }
 }
 
-/** Case de la grille : l'affiche, puis le titre dessous (et la date d'ajout pour les nouveautés). */
+/**
+ * Case de la grille : l'affiche, puis le titre dessous (et la date d'ajout pour les nouveautés).
+ * Un cœur en haut à droite signale un favori ; l'appui long ajoute ou retire des favoris.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PosterCard(m: Media, subtitle: String?, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Poster(m.icon, m.name, Modifier.fillMaxWidth())
+fun PosterCard(
+    m: Media,
+    subtitle: String?,
+    favorite: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+        Box {
+            Poster(m.icon, m.name, Modifier.fillMaxWidth())
+            if (favorite) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(4.dp).size(24.dp)
+                        .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Favorite, "Favori", tint = Color(0xFFFF5A6E), modifier = Modifier.size(15.dp))
+                }
+            }
+        }
         Spacer(Modifier.height(6.dp))
         Text(
             m.name,
@@ -715,6 +794,7 @@ private fun CategoryDropdown(
     categories: List<Category>,
     counts: Map<String, Int>,
     watchingCount: Int,
+    favCount: Int,
     recentCount: Int,
     onSelect: (String?) -> Unit,
 ) {
@@ -722,6 +802,7 @@ private fun CategoryDropdown(
     val label = when (selected) {
         null -> "Toutes les catégories"
         WATCH_CAT -> "En cours"
+        FAV_CAT -> "Favoris"
         NEW_CAT -> "Nouveautés"
         else -> categories.firstOrNull { it.id == selected }?.name ?: "Toutes les catégories"
     }
@@ -770,9 +851,22 @@ private fun CategoryDropdown(
             }
             option(null, "Toutes les catégories", null)
             if (watchingCount > 0) option(WATCH_CAT, "En cours", watchingCount, Icons.Filled.History)
+            option(FAV_CAT, "Favoris", favCount, Icons.Filled.Favorite)
             if (recentCount > 0) option(NEW_CAT, "Nouveautés", recentCount, Icons.Filled.NewReleases)
             HorizontalDivider()
             categories.forEach { c -> option(c.id, c.name, counts[c.id] ?: 0) }
         }
+    }
+}
+
+/** Cœur plein (favori) ou vide, pour ajouter / retirer un titre des favoris. */
+@Composable
+fun FavoriteButton(favorite: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(
+            if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+            contentDescription = if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
+            tint = if (favorite) Color(0xFFFF5A6E) else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }

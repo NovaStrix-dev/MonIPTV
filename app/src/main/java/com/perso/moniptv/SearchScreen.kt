@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -50,6 +51,7 @@ private data class Results(val movies: List<Media>, val series: List<Media>)
  */
 @Composable
 fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Unit) {
+    val ctx = LocalContext.current
     var query by rememberSaveable { mutableStateOf("") }
     var scope by rememberSaveable { mutableStateOf(Scope.ALL) }
     var selectedMovie by remember { mutableStateOf<Media?>(null) }
@@ -108,11 +110,11 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
             ) {
                 if (showMovies && results.movies.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Films (${results.movies.size})") }
-                    items(results.movies) { m -> PosterCard(m, movieCats[m.categoryId]) { selectedMovie = m } }
+                    items(results.movies) { m -> PosterCard(m, movieCats[m.categoryId], vm.isFavorite(m), { toggleFavoriteWithToast(ctx, vm, m) }) { selectedMovie = m } }
                 }
                 if (showSeries && results.series.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Séries (${results.series.size})") }
-                    items(results.series) { m -> PosterCard(m, seriesCats[m.categoryId]) { onOpenSeries(m) } }
+                    items(results.series) { m -> PosterCard(m, seriesCats[m.categoryId], vm.isFavorite(m), { toggleFavoriteWithToast(ctx, vm, m) }) { onOpenSeries(m) } }
                 }
             }
         }

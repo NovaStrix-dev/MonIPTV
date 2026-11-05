@@ -40,6 +40,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         watching = WatchProgress.all(ctx)
     }
 
+    /** Favoris : clé (voir [Favorites.key]) → date d'ajout aux favoris. */
+    var favorites by mutableStateOf(Favorites.all(ctx))
+        private set
+
+    fun isFavorite(m: Media): Boolean = Favorites.key(m) in favorites
+
+    /** Ajoute ou retire un film / une série des favoris. Renvoie true s'il est maintenant en favori. */
+    fun toggleFavorite(m: Media): Boolean {
+        val now = !isFavorite(m)
+        if (now) Favorites.add(ctx, m) else Favorites.remove(ctx, m)
+        favorites = Favorites.all(ctx)
+        return now
+    }
+
     fun removeWatching(key: String) {
         WatchProgress.remove(ctx, key)
         reloadWatching()
