@@ -38,3 +38,9 @@ la configuration (la clé de signature `app/moniptv.jks` est fixe — gardez-la)
 - Les téléchargements sont stockés dans l'espace privé de l'appli : ils sont supprimés si
   vous désinstallez l'application.
 - Bouton ⟳ : met à jour le catalogue. Bouton de sortie : change de compte (garde les téléchargements).
+- **Sous-titres** : pendant une vidéo, touchez l'écran puis « Style des sous-titres » (en haut à droite)
+  pour choisir la taille, la couleur, le contour ou le fond, la position et le gras. Le réglage est gardé
+  pour toutes les vidéos.
+- **Avec un VPN** : l'appli contourne le filtre DNS des VPN et privilégie l'IPv4. Si la connexion échoue
+  quand même alors qu'elle marche sans VPN, c'est que le fournisseur IPTV bloque les adresses du VPN :
+  changez de pays/serveur dans le VPN, ou excluez MonIPTV du VPN (« tunnel fractionné » / *split tunneling*).

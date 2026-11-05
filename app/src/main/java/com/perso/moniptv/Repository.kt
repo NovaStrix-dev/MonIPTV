@@ -16,7 +16,7 @@ object Repository {
      */
     suspend fun fetchCatalog(acc: Account, previous: Catalog? = null): Catalog = withContext(Dispatchers.IO) {
         val c = when (acc.type) {
-            AccountType.XTREAM -> fetchXtream(acc)
+            AccountType.XTREAM -> fetchXtream(acc, previous)
             AccountType.M3U -> {
                 val parsed = Http.getLines(m3uUrl(acc)) { M3uParser.parse(it) }
                 if (parsed.live.isEmpty() && parsed.movies.isEmpty() && parsed.series.isEmpty()) {
@@ -42,19 +42,38 @@ object Repository {
         }
     }
 
-    private suspend fun fetchXtream(acc: Account): Catalog = coroutineScope {
+    /**
+     * Les listes sont chargées en parallèle. Si l'une échoue (connexion coupée, délai dépassé, fréquent
+     * derrière un VPN), on garde la version de l'actualisation précédente au lieu d'enregistrer
+     * une liste vide (ce qui vidait la bibliothèque). Sans version précédente, l'erreur est remontée.
+     */
+    private suspend fun fetchXtream(acc: Account, previous: Catalog?): Catalog = coroutineScope {
         val api = XtreamApi(acc)
         val ext = api.authenticate()
-        val liveCats = async { runCatching { api.categories("get_live_categories") }.getOrDefault(emptyList()) }
-        val live = async { runCatching { api.live(ext) }.getOrDefault(emptyList()) }
-        val movieCats = async { runCatching { api.categories("get_vod_categories") }.getOrDefault(emptyList()) }
-        val movies = async { runCatching { api.movies() }.getOrDefault(emptyList()) }
-        val seriesCats = async { runCatching { api.categories("get_series_categories") }.getOrDefault(emptyList()) }
-        val series = async { runCatching { api.series() }.getOrDefault(emptyList()) }
+        val liveCats = async { runCatching { api.categories("get_live_categories") } }
+        val live = async { runCatching { api.live(ext) } }
+        val movieCats = async { runCatching { api.categories("get_vod_categories") } }
+        val movies = async { runCatching { api.movies() } }
+        val seriesCats = async { runCatching { api.categories("get_series_categories") } }
+        val series = async { runCatching { api.series() } }
+
+        fun <T> cats(r: Result<List<T>>, old: List<T>?): List<T> =
+            r.getOrNull() ?: old ?: emptyList()
+
+        // Coupure réseau sans version précédente : on remonte l'erreur (sinon la liste resterait vide).
+        // Réponse refusée ou illisible pour une seule liste (serveur sans séries, par ex.) : liste vide.
+        fun <T> items(r: Result<List<T>>, old: List<T>?): List<T> = r.getOrElse { e ->
+            when {
+                !old.isNullOrEmpty() -> old
+                e is IOException && e !is HttpStatusException -> throw e
+                else -> emptyList()
+            }
+        }
+
         val c = Catalog(
-            liveCats.await(), live.await(),
-            movieCats.await(), movies.await(),
-            seriesCats.await(), series.await(),
+            cats(liveCats.await(), previous?.liveCats), items(live.await(), previous?.live),
+            cats(movieCats.await(), previous?.movieCats), items(movies.await(), previous?.movies),
+            cats(seriesCats.await(), previous?.seriesCats), items(series.await(), previous?.series),
         )
         if (c.live.isEmpty() && c.movies.isEmpty() && c.series.isEmpty()) {
             throw IOException("Connexion réussie mais aucun contenu reçu du serveur")

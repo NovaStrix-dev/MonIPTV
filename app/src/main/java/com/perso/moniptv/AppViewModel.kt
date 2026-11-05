@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -142,10 +143,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return Repository.episodes(acc, catalog, series)
     }
 
-    private fun friendly(e: Exception): String = when (e) {
-        is UnknownHostException -> "Serveur introuvable (vérifiez l'adresse ou la connexion Internet)"
-        is ConnectException -> "Impossible de joindre le serveur"
-        is SocketTimeoutException -> "Le serveur met trop de temps à répondre"
-        else -> e.message ?: "Erreur inconnue"
+    private fun friendly(e: Exception): String {
+        val base = when (e) {
+            is UnknownHostException -> "Serveur introuvable (vérifiez l'adresse ou la connexion Internet)"
+            is ConnectException -> "Impossible de joindre le serveur"
+            is SocketTimeoutException -> "Le serveur met trop de temps à répondre"
+            is SSLException -> "Connexion sécurisée impossible avec le serveur"
+            is HttpStatusException -> when (e.code) {
+                401, 403, 451 -> "Le serveur refuse l'accès (HTTP ${e.code})"
+                404 -> "Adresse introuvable sur le serveur (HTTP 404) : vérifiez l'adresse"
+                429 -> "Trop de connexions en même temps (HTTP 429), réessayez dans un moment"
+                in 500..599 -> "Le serveur rencontre un problème (HTTP ${e.code}), réessayez plus tard"
+                else -> e.message ?: "Erreur du serveur"
+            }
+            else -> e.message ?: "Erreur inconnue"
+        }
+        if (!Http.isVpnActive(ctx)) return base
+        return base + "\n\nUn VPN est actif. Si tout marche sans lui, le fournisseur IPTV bloque " +
+            "probablement les adresses de ce VPN : essayez un autre pays ou serveur dans le VPN, " +
+            "ou excluez MonIPTV du VPN (option « tunnel fractionné » ou « split tunneling » de l'appli VPN)."
     }
 }

@@ -6,7 +6,29 @@ import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.os.Bundle
 import android.widget.Toast
+import android.view.View
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -18,7 +40,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -38,6 +60,11 @@ class PlayerActivity : ComponentActivity() {
     private val legacyPositions by lazy { getSharedPreferences("positions", MODE_PRIVATE) }
     private val settings by lazy { getSharedPreferences("player", MODE_PRIVATE) }
 
+    /** Apparence des sous-titres (issue #5) et état de l'interface au-dessus du lecteur. */
+    private var subStyle by mutableStateOf(SubtitleStyle())
+    private var controlsVisible by mutableStateOf(false)
+    private var styleDialog by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         url = intent.getStringExtra(EXTRA_URL) ?: ""
@@ -53,11 +80,55 @@ class PlayerActivity : ComponentActivity() {
             // Bouton « Sous-titres » dans la barre du lecteur (masqué par défaut dans Media3).
             // Il liste les sous-titres du fichier ou du flux et permet de les désactiver.
             setShowSubtitleButton(true)
+            setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v ->
+                controlsVisible = v == View.VISIBLE
+            })
         }
-        setContentView(playerView)
+        subStyle = SubtitleStyle.load(this)
+        playerView.subtitleView?.let { subStyle.applyTo(it) }
+
+        setContent {
+            AppTheme {
+                Box(Modifier.fillMaxSize()) {
+                    AndroidView(factory = { playerView }, modifier = Modifier.fillMaxSize())
+                    // Bouton « Apparence des sous-titres », visible avec les commandes du lecteur.
+                    if (controlsVisible) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = androidx.compose.ui.graphics.Color(0x99000000),
+                            contentColor = androidx.compose.ui.graphics.Color.White,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(16.dp)
+                                .clickable { styleDialog = true },
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Filled.ClosedCaption, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Style des sous-titres")
+                            }
+                        }
+                    }
+                    if (styleDialog) {
+                        SubtitleStyleDialog(
+                            style = subStyle,
+                            onChange = { s ->
+                                subStyle = s
+                                SubtitleStyle.save(this@PlayerActivity, s)
+                                playerView.subtitleView?.let { s.applyTo(it) }
+                            },
+                            onDismiss = { styleDialog = false },
+                        )
+                    }
+                }
+            }
+        }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, playerView).apply {
+        WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
@@ -81,11 +152,11 @@ class PlayerActivity : ComponentActivity() {
 
     private fun initPlayer() {
         if (player != null) return
-        val http = DefaultHttpDataSource.Factory()
-            .setUserAgent(Http.USER_AGENT)
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(20_000)
-            .setReadTimeoutMs(30_000)
+        // Même client réseau que le reste de l'appli (résolution d'adresses adaptée aux VPN).
+        val okhttp = Http.client.newBuilder()
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val http = OkHttpDataSource.Factory(okhttp).setUserAgent(Http.USER_AGENT)
         val dataSource = DefaultDataSource.Factory(this, http) // gère aussi les fichiers locaux
         val renderers = DefaultRenderersFactory(this)
             .setEnableDecoderFallback(true)
@@ -110,9 +181,13 @@ class PlayerActivity : ComponentActivity() {
                     p.seekToDefaultPosition()
                     p.prepare()
                 } else {
+                    val network = error.errorCode in 2000..2999 // erreurs de connexion / réseau
+                    val hint = if (network && !url.startsWith("file:") && Http.isVpnActive(this@PlayerActivity)) {
+                        "\nVPN actif : le fournisseur bloque peut-être la lecture via ce VPN."
+                    } else ""
                     Toast.makeText(
                         this@PlayerActivity,
-                        "Lecture impossible (${error.errorCodeName})",
+                        "Lecture impossible (${error.errorCodeName})$hint",
                         Toast.LENGTH_LONG,
                     ).show()
                 }
