@@ -1030,7 +1030,7 @@ fun VpnBypassButton(vm: AppViewModel, onEnabled: () -> Unit = { vm.refresh() }) 
                 )
             },
             confirmButton = {
-                TextButton(onClick = { confirm = false; vm.setBypassVpn(true); onEnabled() }) { Text("Contourner") }
+                TextButton(onClick = { confirm = false; vm.changeBypassVpn(true); onEnabled() }) { Text("Contourner") }
             },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Annuler") } },
         )
@@ -1045,6 +1045,6 @@ fun VpnBypassNotice(vm: AppViewModel) {
         "MonIPTV passe à côté du VPN · toucher pour arrêter",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        modifier = Modifier.fillMaxWidth().clickable { vm.setBypassVpn(false) }.padding(horizontal = 14.dp, vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth().clickable { vm.changeBypassVpn(false) }.padding(horizontal = 14.dp, vertical = 2.dp),
     )
 }

@@ -177,7 +177,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun vpnActive(): Boolean = Http.isVpnActive(ctx)
 
-    fun setBypassVpn(on: Boolean) {
+    fun changeBypassVpn(on: Boolean) {
         SystemNetwork.bypassVpn = on
         bypassVpn = on
     }
