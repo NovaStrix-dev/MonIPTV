@@ -30,6 +30,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Message bref à afficher une fois (ex. résultat d'une actualisation). */
     var info by mutableStateOf<String?>(null)
 
+    /** Films et épisodes commencés mais pas terminés (section « En cours »), du plus récent au plus ancien. */
+    var watching by mutableStateOf(WatchProgress.all(ctx))
+        private set
+
+    /** À appeler au retour du lecteur : la position vient d'être enregistrée. */
+    fun reloadWatching() {
+        watching = WatchProgress.all(ctx)
+    }
+
+    fun removeWatching(key: String) {
+        WatchProgress.remove(ctx, key)
+        reloadWatching()
+    }
+
+    /**
+     * Lance un film ou un épisode en gardant sa progression pour « En cours ».
+     * Si le titre a été téléchargé, c'est le fichier du téléphone qui est lu (marche hors ligne).
+     */
+    fun play(context: android.content.Context, meta: WatchMeta) {
+        val local = downloads.records().firstOrNull { it.key == meta.key }
+            ?.let { downloads.fileOf(it) }
+            ?.takeIf { it.exists() && it.length() > 0 && !downloads.isRunning(meta.key) }
+        val label = listOfNotNull(meta.title, meta.subtitle).joinToString(" · ")
+        PlayerActivity.start(
+            context,
+            local?.let { android.net.Uri.fromFile(it).toString() } ?: meta.url,
+            label,
+            live = false,
+            meta = meta,
+        )
+    }
+
     init {
         account = runCatching { store.load() }.getOrNull()
         if (account != null) {
@@ -98,6 +130,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun logout() {
         store.clear()
         CatalogCache.delete(ctx)
+        WatchProgress.clear(ctx)
+        watching = emptyList()
         account = null
         catalog = null
         error = null

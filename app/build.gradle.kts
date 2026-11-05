@@ -14,8 +14,8 @@ android {
         applicationId = "com.perso.moniptv"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     // Clé de signature fixe : les mises à jour de l'APK s'installent par-dessus

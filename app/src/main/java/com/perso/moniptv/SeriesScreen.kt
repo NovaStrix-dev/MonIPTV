@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Scaffold
@@ -93,9 +94,21 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                         items(eps.filter { it.season == current }) { e ->
                             val key = "ep:${series.id}:${e.id}"
                             val label = "S%02dE%02d".format(e.season, e.number)
+                            val meta = e.watchMeta(series)
+                            val started = vm.watching.firstOrNull { it.meta.key == meta.key }
                             ListItem(
                                 headlineContent = { Text(e.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                                supportingContent = { Text(label) },
+                                supportingContent = {
+                                    Column {
+                                        Text(if (started != null) "$label · en cours, arrêté à ${formatTime(started.position)}" else label)
+                                        if (started != null && started.duration > 0) {
+                                            LinearProgressIndicator(
+                                                progress = { started.progress },
+                                                modifier = Modifier.padding(top = 4.dp).width(120.dp),
+                                            )
+                                        }
+                                    }
+                                },
                                 trailingContent = {
                                     Row {
                                         IconButton(onClick = {
@@ -109,12 +122,12 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                                         }) {
                                             Icon(if (key in dlKeys) Icons.Filled.DownloadDone else Icons.Filled.Download, "Télécharger")
                                         }
-                                        IconButton(onClick = { PlayerActivity.start(ctx, e.url, e.title, live = false) }) {
+                                        IconButton(onClick = { vm.play(ctx, meta) }) {
                                             Icon(Icons.Filled.PlayArrow, "Lire")
                                         }
                                     }
                                 },
-                                modifier = Modifier.clickable { PlayerActivity.start(ctx, e.url, e.title, live = false) },
+                                modifier = Modifier.clickable { vm.play(ctx, meta) },
                             )
                         }
                     }

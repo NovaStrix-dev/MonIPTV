@@ -82,6 +82,18 @@ class Downloads(private val ctx: Context) {
         return true
     }
 
+    /** Vrai si le téléchargement de ce titre n'est pas encore terminé. */
+    fun isRunning(key: String): Boolean {
+        val r = records().firstOrNull { it.key == key } ?: return false
+        dm.query(DownloadManager.Query().setFilterById(r.downloadId))?.use { c ->
+            if (c.moveToFirst()) {
+                val st = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                return st != DownloadManager.STATUS_SUCCESSFUL
+            }
+        }
+        return false
+    }
+
     fun list(): List<DownloadInfo> {
         val recs = records()
         if (recs.isEmpty()) return emptyList()

@@ -84,7 +84,18 @@ fun DownloadsScreen(vm: AppViewModel) {
                     }
                     if (d.state == DlState.DONE) {
                         IconButton(onClick = {
-                            PlayerActivity.start(ctx, Uri.fromFile(d.file).toString(), d.record.title, live = false)
+                            // Même progression que la lecture en ligne (section « En cours »).
+                            val r = d.record
+                            val meta = vm.watching.firstOrNull { it.meta.key == r.key }?.meta ?: WatchMeta(
+                                key = r.key,
+                                type = if (r.key.startsWith("ep:")) ContentType.SERIES else ContentType.MOVIE,
+                                title = r.title,
+                                subtitle = null,
+                                icon = r.icon,
+                                url = Uri.fromFile(d.file).toString(),
+                                seriesId = if (r.key.startsWith("ep:")) r.key.split(':').getOrNull(1) else null,
+                            )
+                            PlayerActivity.start(ctx, Uri.fromFile(d.file).toString(), r.title, live = false, meta = meta)
                         }) { Icon(Icons.Filled.PlayArrow, "Lire") }
                     }
                     IconButton(onClick = { toDelete = d }) { Icon(Icons.Filled.Delete, "Supprimer") }

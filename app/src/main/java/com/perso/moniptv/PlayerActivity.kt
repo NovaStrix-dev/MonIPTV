@@ -10,10 +10,12 @@ import androidx.activity.ComponentActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -21,6 +23,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import org.json.JSONObject
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
@@ -29,12 +32,17 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var playerView: PlayerView
     private var url: String = ""
     private var live = false
-    private val positions by lazy { getSharedPreferences("positions", MODE_PRIVATE) }
+    private var meta: WatchMeta? = null
+
+    /** Anciennes positions (versions précédentes de l'appli), clé = adresse de lecture. */
+    private val legacyPositions by lazy { getSharedPreferences("positions", MODE_PRIVATE) }
+    private val settings by lazy { getSharedPreferences("player", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         url = intent.getStringExtra(EXTRA_URL) ?: ""
         live = intent.getBooleanExtra(EXTRA_LIVE, false)
+        meta = intent.getStringExtra(EXTRA_META)?.let { decodeMeta(it) }
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         playerView = PlayerView(this).apply {
@@ -42,6 +50,9 @@ class PlayerActivity : ComponentActivity() {
             keepScreenOn = true
             setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
             controllerShowTimeoutMs = 3500
+            // Bouton « Sous-titres » dans la barre du lecteur (masqué par défaut dans Media3).
+            // Il liste les sous-titres du fichier ou du flux et permet de les désactiver.
+            setShowSubtitleButton(true)
         }
         setContentView(playerView)
 
@@ -84,6 +95,15 @@ class PlayerActivity : ComponentActivity() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .build()
 
+        // Sous-titres : on réactive automatiquement la dernière langue choisie.
+        val subLang = settings.getString(PREF_SUB_LANG, null)
+        if (subLang != null && subLang != SUB_OFF) {
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setPreferredTextLanguage(if (subLang == SUB_UND) null else subLang)
+                .setSelectUndeterminedTextLanguage(true)
+                .build()
+        }
+
         p.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
@@ -97,6 +117,8 @@ class PlayerActivity : ComponentActivity() {
                     ).show()
                 }
             }
+
+            override fun onTracksChanged(tracks: Tracks) = rememberSubtitleChoice(tracks)
         })
 
         val item = MediaItem.Builder().setUri(url)
@@ -105,7 +127,8 @@ class PlayerActivity : ComponentActivity() {
         }
         p.setMediaItem(item.build())
         if (!live) {
-            val pos = positions.getLong(url, 0L)
+            val pos = meta?.let { WatchProgress.position(this, it.key) }?.takeIf { it > 0 }
+                ?: legacyPositions.getLong(url, 0L)
             if (pos > 0) p.seekTo(pos)
         }
         p.playWhenReady = true
@@ -114,15 +137,40 @@ class PlayerActivity : ComponentActivity() {
         player = p
     }
 
+    /** Mémorise la langue des sous-titres choisie (ou « aucun ») pour les prochaines lectures. */
+    private fun rememberSubtitleChoice(tracks: Tracks) {
+        val text = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+        if (text.isEmpty()) return
+        val selected = text.firstNotNullOfOrNull { g ->
+            (0 until g.length).firstOrNull { g.isTrackSelected(it) }?.let { g.getTrackFormat(it).language ?: SUB_UND }
+        }
+        val saved = settings.getString(PREF_SUB_LANG, null)
+        val value = when {
+            selected != null -> selected
+            // Rien de sélectionné alors que la langue habituelle existe ici : l'utilisateur a choisi « Aucun ».
+            saved != null && saved != SUB_OFF && text.any { g ->
+                (0 until g.length).any { (g.getTrackFormat(it).language ?: SUB_UND) == saved }
+            } -> SUB_OFF
+            else -> return
+        }
+        if (value != saved) settings.edit().putString(PREF_SUB_LANG, value).apply()
+    }
+
     private fun releasePlayer() {
         val p = player ?: return
         if (!live) {
-            val duration = p.duration
+            val duration = p.duration.takeIf { it != C.TIME_UNSET } ?: 0L
             val pos = p.currentPosition
-            val e = positions.edit()
-            // Reprise automatique là où on s'était arrêté (sauf si fini).
-            if (duration > 0 && pos > duration - 60_000) e.remove(url) else e.putLong(url, pos)
-            e.apply()
+            val m = meta
+            if (m != null) {
+                WatchProgress.record(this, m, pos, duration)
+                legacyPositions.edit().remove(url).apply()
+            } else {
+                val e = legacyPositions.edit()
+                // Reprise automatique là où on s'était arrêté (sauf si fini).
+                if (duration > 0 && pos > duration - 60_000) e.remove(url) else e.putLong(url, pos)
+                e.apply()
+            }
         }
         p.release()
         player = null
@@ -133,14 +181,39 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_LIVE = "live"
+        private const val EXTRA_META = "meta"
 
-        fun start(ctx: Context, url: String, title: String, live: Boolean) {
+        private const val PREF_SUB_LANG = "subtitle_lang"
+        private const val SUB_OFF = "off"
+        private const val SUB_UND = "und"
+
+        fun start(ctx: Context, url: String, title: String, live: Boolean, meta: WatchMeta? = null) {
             ctx.startActivity(
                 Intent(ctx, PlayerActivity::class.java)
                     .putExtra(EXTRA_URL, url)
                     .putExtra(EXTRA_TITLE, title)
                     .putExtra(EXTRA_LIVE, live)
+                    .putExtra(EXTRA_META, meta?.let { encodeMeta(it) })
             )
         }
+
+        private fun encodeMeta(m: WatchMeta): String = JSONObject()
+            .put("key", m.key).put("type", m.type.name).put("title", m.title)
+            .put("subtitle", m.subtitle ?: "").put("icon", m.icon ?: "").put("url", m.url)
+            .put("seriesId", m.seriesId ?: "")
+            .toString()
+
+        private fun decodeMeta(s: String): WatchMeta? = runCatching {
+            val o = JSONObject(s)
+            WatchMeta(
+                key = o.getString("key"),
+                type = ContentType.valueOf(o.getString("type")),
+                title = o.getString("title"),
+                subtitle = o.optString("subtitle").ifEmpty { null },
+                icon = o.optString("icon").ifEmpty { null },
+                url = o.getString("url"),
+                seriesId = o.optString("seriesId").ifEmpty { null },
+            )
+        }.getOrNull()
     }
 }

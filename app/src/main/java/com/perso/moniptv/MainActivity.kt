@@ -3,21 +3,28 @@ package com.perso.moniptv
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.lifecycle.viewmodel.compose.viewModel
 
 class MainActivity : ComponentActivity() {
+    private val vm: AppViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             AppTheme {
-                val vm: AppViewModel = viewModel()
                 if (vm.account == null) LoginScreen(vm) else MainScreen(vm)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Retour du lecteur : met à jour la section « En cours ».
+        vm.reloadWatching()
     }
 }
 
