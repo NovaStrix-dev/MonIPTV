@@ -76,9 +76,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
-    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
+    implementation("androidx.media3:media3-ui:1.3.1")
+    // Décodeur audio logiciel FFmpeg (AC3, E-AC3, DTS, TrueHD…) : évite les vidéos sans son.
+    // Doit rester sur la même version de Media3 que les lignes ci-dessus.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.3.1+2")
 
     implementation("androidx.security:security-crypto:1.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
