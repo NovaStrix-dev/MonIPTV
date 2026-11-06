@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -64,6 +65,8 @@ class PlayerActivity : ComponentActivity() {
     private var url: String = ""
     private var live = false
     private var meta: WatchMeta? = null
+    /** Titre affiché à côté du bouton Retour (#20). */
+    private var playTitle: String = ""
 
     /** Zapping (#17) : chaînes de la catégorie choisie et position de la chaîne en cours. */
     private var channels: List<LiveChannel> = emptyList()
@@ -85,6 +88,7 @@ class PlayerActivity : ComponentActivity() {
         url = intent.getStringExtra(EXTRA_URL) ?: ""
         live = intent.getBooleanExtra(EXTRA_LIVE, false)
         meta = intent.getStringExtra(EXTRA_META)?.let { decodeMeta(it) }
+        playTitle = intent.getStringExtra(EXTRA_TITLE) ?: ""
         if (live) {
             channels = LivePlaylist.channels
             groupName = LivePlaylist.groupName
@@ -148,23 +152,34 @@ class PlayerActivity : ComponentActivity() {
                             ZapButton(Icons.Filled.KeyboardArrowDown, "Chaîne suivante") { zap(+1) }
                         }
                     }
-                    // Nom de la chaîne et position dans la catégorie.
-                    if (live && controlsVisible && channelName.isNotEmpty()) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = androidx.compose.ui.graphics.Color(0x99000000),
-                            contentColor = androidx.compose.ui.graphics.Color.White,
-                            modifier = Modifier.align(Alignment.TopStart).padding(16.dp).widthIn(max = 420.dp),
+                    // Retour à la liste (#20) + titre : nom de la chaîne et position dans la catégorie,
+                    // ou titre du film / de la série et de l'épisode.
+                    if (controlsVisible) {
+                        val heading = if (live) channelName else (meta?.title ?: playTitle)
+                        val sub = when {
+                            live && channels.size > 1 && channelIndex >= 0 -> "$groupName · ${channelIndex + 1}/${channels.size}"
+                            live -> null
+                            else -> meta?.subtitle
+                        }
+                        Row(
+                            Modifier.align(Alignment.TopStart).padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
-                                Text(channelName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                                if (channels.size > 1 && channelIndex >= 0) {
-                                    Text(
-                                        "$groupName · ${channelIndex + 1}/${channels.size}",
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelMedium,
-                                    )
+                            BackButton { finish() }
+                            if (heading.isNotEmpty()) {
+                                Spacer(Modifier.width(12.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = androidx.compose.ui.graphics.Color(0x99000000),
+                                    contentColor = androidx.compose.ui.graphics.Color.White,
+                                    modifier = Modifier.widthIn(max = 420.dp),
+                                ) {
+                                    Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                                        Text(heading, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                                        if (!sub.isNullOrEmpty()) {
+                                            Text(sub, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -422,5 +437,25 @@ private fun ZapButton(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
         modifier = Modifier.clickable(onClick = onClick),
     ) {
         Icon(icon, contentDescription = label, modifier = Modifier.padding(12.dp).size(32.dp))
+    }
+}
+
+/** Bouton « Retour » du lecteur (#20) : revient à la liste des films, séries ou chaînes. */
+@androidx.compose.runtime.Composable
+private fun BackButton(onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = androidx.compose.ui.graphics.Color(0x99000000),
+        contentColor = androidx.compose.ui.graphics.Color.White,
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Retour")
+        }
     }
 }
