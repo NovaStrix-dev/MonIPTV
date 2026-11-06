@@ -60,8 +60,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Tab as TabItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -189,45 +189,46 @@ fun MainScreen(vm: AppViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        when (tab) {
-                            Tab.LIVE -> "TV en direct"
-                            Tab.MOVIES -> "Films"
-                            Tab.SERIES -> "Séries"
-                            Tab.SEARCH -> "Recherche"
-                            Tab.DOWNLOADS -> "Hors ligne"
+            Column {
+                TopAppBar(
+                    title = {
+                        Text(
+                            when (tab) {
+                                Tab.LIVE -> "TV en direct"
+                                Tab.MOVIES -> "Films"
+                                Tab.SERIES -> "Séries"
+                                Tab.SEARCH -> "Recherche"
+                                Tab.DOWNLOADS -> "Hors ligne"
+                            }
+                        )
+                    },
+                    actions = {
+                        // Bouton d'actualisation à la demande.
+                        TextButton(onClick = { vm.refresh() }, enabled = !vm.loading) {
+                            if (vm.loading) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.Refresh, null, Modifier.size(20.dp))
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (vm.loading) "Mise à jour…" else "Actualiser")
                         }
-                    )
-                },
-                actions = {
-                    // Bouton d'actualisation à la demande.
-                    TextButton(onClick = { vm.refresh() }, enabled = !vm.loading) {
-                        if (vm.loading) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Filled.Refresh, null, Modifier.size(20.dp))
+                        IconButton(onClick = { confirmLogout = true }) {
+                            Icon(Icons.AutoMirrored.Filled.Logout, "Changer de compte")
                         }
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (vm.loading) "Mise à jour…" else "Actualiser")
+                    },
+                )
+                // Barre d'onglets en haut de l'écran (#21), sous la barre de titre.
+                TabRow(selectedTabIndex = tab.ordinal) {
+                    Tab.entries.forEach { t ->
+                        TabItem(
+                            selected = tab == t,
+                            onClick = { tab = t },
+                            icon = { Icon(t.icon, null) },
+                            text = { Text(t.label, fontSize = 11.sp, maxLines = 1, softWrap = false) },
+                        )
                     }
-                    IconButton(onClick = { confirmLogout = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Logout, "Changer de compte")
-                    }
-                },
-            )
-        },
-        bottomBar = {
-            NavigationBar {
-                Tab.entries.forEach { t ->
-                    NavigationBarItem(
-                        selected = tab == t,
-                        onClick = { tab = t },
-                        icon = { Icon(t.icon, null) },
-                        label = { Text(t.label, fontSize = 11.sp, maxLines = 1) },
-                    )
-                }
+            }
             }
         },
     ) { pad ->
@@ -324,7 +325,6 @@ fun BrowseScreen(
     onOpenSeries: (Media) -> Unit,
 ) {
     val ctx = LocalContext.current
-    var query by rememberSaveable { mutableStateOf("") }
     var cat by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedMovie by remember { mutableStateOf<Media?>(null) }
     var watchMenu by remember { mutableStateOf<WatchEntry?>(null) }
@@ -338,7 +338,6 @@ fun BrowseScreen(
     // Si la liste « En cours » se vide pendant qu'on la regarde, on revient à « Toutes ».
     LaunchedEffect(watching.isEmpty()) { if (watching.isEmpty() && cat == WATCH_CAT) cat = null }
     val shownWatching = when {
-        query.isNotBlank() -> emptyList()
         cat == WATCH_CAT -> watching
         cat == null -> watching.take(WATCH_PREVIEW)
         else -> emptyList()
@@ -366,12 +365,10 @@ fun BrowseScreen(
         }
     }
 
-    val sections by produceState<List<Section>?>(initialValue = null, sorted, query, cat, recent, favs) {
+    val sections by produceState<List<Section>?>(initialValue = null, sorted, cat, recent, favs) {
         val items = sorted
         value = withContext(Dispatchers.Default) {
-            val words = queryWords(query)
             when {
-                words.isNotEmpty() -> listOf(Section("", items.filter { it.matches(words) }))
                 cat == WATCH_CAT -> emptyList()
                 cat == NEW_CAT -> listOf(Section("", recent, showDates = true))
                 cat == FAV_CAT -> listOf(Section("", favs))
@@ -410,45 +407,36 @@ fun BrowseScreen(
         if (shownWatching.isNotEmpty() && cat == null) add(WATCH_CAT)
         sections?.forEach { if (it.title.isNotEmpty()) add(it.id) }
     }
-    val canCollapse = query.isBlank() && cat == null && type != ContentType.LIVE && allSectionIds.isNotEmpty()
+    val canCollapse = cat == null && type != ContentType.LIVE && allSectionIds.isNotEmpty()
     val allCollapsed = canCollapse && allSectionIds.all { it in collapsed }
 
-    // Remonte en haut de la liste quand on change de catégorie ou de recherche.
-    LaunchedEffect(cat, query) {
+    // Remonte en haut de la liste quand on change de catégorie.
+    LaunchedEffect(cat) {
         runCatching { listState.scrollToItem(0) }
         runCatching { gridState.scrollToItem(0) }
     }
 
     Column(Modifier.fillMaxSize()) {
-        // Recherche et catégorie sur une seule ligne compacte (40 dp) : accessibles mais discrètes.
-        Row(
+        // Films et séries : sélecteur de catégorie compact (40 dp). La recherche se fait dans l'onglet Recherche (#21).
+        if (type != ContentType.LIVE) Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            CompactSearchField(
-                query = query,
-                onQueryChange = { query = it },
-                placeholder = "Rechercher…",
-                modifier = Modifier.weight(1f),
+            CategoryDropdown(
+                selected = cat,
+                categories = categories,
+                counts = catCounts,
+                watchingCount = watching.size,
+                favCount = favs.size,
+                recentCount = recent.size,
+                onSelect = { cat = it },
+                modifier = Modifier.fillMaxWidth(),
             )
-            if (query.isBlank() && type != ContentType.LIVE) {
-                CategoryDropdown(
-                    selected = cat,
-                    categories = categories,
-                    counts = catCounts,
-                    watchingCount = watching.size,
-                    favCount = favs.size,
-                    recentCount = recent.size,
-                    onSelect = { cat = it },
-                    modifier = Modifier.weight(1f),
-                )
-            }
         }
         // TV : rangée de boutons de catégorie (films et séries ont la liste déroulante ci-dessus).
-        if (query.isBlank() && type == ContentType.LIVE) {
+        if (type == ContentType.LIVE) {
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 12.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item { FilterChip(selected = cat == null, onClick = { cat = null }, label = { Text("Toutes") }) }
@@ -529,7 +517,6 @@ fun BrowseScreen(
                 // pour passer à la chaîne suivante / précédente sans quitter cette catégorie.
                 val channels = list.flatMap { it.items }
                 val groupName = when {
-                    query.isNotBlank() -> "Recherche « ${query.trim()} »"
                     cat == null -> "Toutes les chaînes"
                     else -> categories.firstOrNull { it.id == cat }?.name ?: "Catégorie"
                 }
