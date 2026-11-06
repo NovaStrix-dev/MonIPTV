@@ -76,6 +76,10 @@ fun DownloadsScreen(vm: AppViewModel) {
                                 LinearProgressIndicator(progress = { d.progress }, modifier = Modifier.fillMaxWidth())
                                 Text("${(d.progress * 100).toInt()} %", style = MaterialTheme.typography.labelSmall)
                             }
+                            DlState.QUEUED -> Text(
+                                if (d.queuePos == 1) "En file d'attente · prochain" else "En file d'attente · n° ${d.queuePos}",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
                             DlState.PENDING -> Text("En attente…", style = MaterialTheme.typography.labelSmall)
                             DlState.PAUSED -> Text("En pause (attente du réseau)", style = MaterialTheme.typography.labelSmall)
                             DlState.DONE -> Text("Disponible hors ligne · ${formatSize(d.file.length())}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -107,14 +111,14 @@ fun DownloadsScreen(vm: AppViewModel) {
     toDelete?.let { d ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
-            title = { Text("Supprimer ?") },
+            title = { Text(if (d.state == DlState.QUEUED) "Retirer de la file ?" else "Supprimer ?") },
             text = { Text(d.record.title) },
             confirmButton = {
                 TextButton(onClick = {
                     vm.downloads.delete(d.record)
                     toDelete = null
                     tick++
-                }) { Text("Supprimer") }
+                }) { Text(if (d.state == DlState.QUEUED) "Retirer" else "Supprimer") }
             },
             dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Annuler") } },
         )

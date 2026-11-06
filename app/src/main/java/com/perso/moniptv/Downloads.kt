@@ -16,13 +16,24 @@ data class DownloadRecord(
     val fileName: String,
 )
 
-enum class DlState { PENDING, RUNNING, PAUSED, DONE, FAILED }
+enum class DlState { QUEUED, PENDING, RUNNING, PAUSED, DONE, FAILED }
+
+/** Épisode en file d'attente : il sera confié au gestionnaire Android quand le précédent sera fini. */
+data class QueuedDownload(
+    val key: String,
+    val title: String,
+    val icon: String?,
+    val url: String,
+    val ext: String,
+)
 
 data class DownloadInfo(
     val record: DownloadRecord,
     val state: DlState,
     val progress: Float,
     val file: File,
+    /** Position dans la file d'attente (1 = le prochain), pour l'état QUEUED. */
+    val queuePos: Int = 0,
 )
 
 /**
@@ -64,6 +75,75 @@ class Downloads(private val ctx: Context) {
 
     fun isDownloaded(key: String) = records().any { it.key == key }
 
+    // ---------- File d'attente (#16 : saison complète) ----------
+    // Beaucoup de fournisseurs n'acceptent qu'une connexion à la fois : les épisodes mis en file
+    // sont téléchargés l'un après l'autre. pump() lance le suivant quand plus rien n'est en cours ;
+    // il est appelé à l'ajout, à la fin de chaque téléchargement (DownloadDoneReceiver) et par l'écran Hors ligne.
+
+    @Synchronized
+    fun queue(): List<QueuedDownload> {
+        val a = JSONArray(prefs.getString("queue", "[]") ?: "[]")
+        return (0 until a.length()).map {
+            val o = a.getJSONObject(it)
+            QueuedDownload(
+                o.getString("key"), o.getString("title"), o.optString("icon").ifEmpty { null },
+                o.getString("url"), o.getString("ext"),
+            )
+        }
+    }
+
+    @Synchronized
+    private fun saveQueue(list: List<QueuedDownload>) {
+        val a = JSONArray()
+        list.forEach {
+            a.put(
+                JSONObject().put("key", it.key).put("title", it.title).put("icon", it.icon ?: "")
+                    .put("url", it.url).put("ext", it.ext)
+            )
+        }
+        prefs.edit().putString("queue", a.toString()).apply()
+    }
+
+    fun isQueued(key: String) = queue().any { it.key == key }
+
+    /** Téléchargé, en cours ou en file d'attente. */
+    fun isKnown(key: String) = isDownloaded(key) || isQueued(key)
+
+    /** Ajoute des épisodes à la file (ceux déjà connus sont ignorés). @return le nombre ajouté. */
+    fun enqueue(items: List<QueuedDownload>): Int = synchronized(LOCK) {
+        val known = records().mapTo(HashSet()) { it.key } + queue().map { it.key }
+        val fresh = items.filter { it.key !in known }.distinctBy { it.key }
+        if (fresh.isNotEmpty()) saveQueue(queue() + fresh)
+        pump()
+        fresh.size
+    }
+
+    /** Vrai si un téléchargement de l'appli est en attente, en cours ou en pause chez le gestionnaire Android. */
+    private fun anyActive(): Boolean {
+        val recs = records()
+        if (recs.isEmpty()) return false
+        dm.query(DownloadManager.Query().setFilterById(*recs.map { it.downloadId }.toLongArray()))?.use { c ->
+            val iSt = c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+            while (c.moveToNext()) {
+                val st = c.getInt(iSt)
+                if (st != DownloadManager.STATUS_SUCCESSFUL && st != DownloadManager.STATUS_FAILED) return true
+            }
+        }
+        return false
+    }
+
+    /** Lance le prochain épisode de la file si plus rien n'est en cours. */
+    fun pump(): Unit = synchronized(LOCK) {
+        while (true) {
+            val q = queue()
+            if (q.isEmpty() || anyActive()) return
+            val next = q.first()
+            saveQueue(q.drop(1))
+            val started = runCatching { start(next.key, next.title, next.icon, next.url, next.ext) }.getOrDefault(false)
+            if (started) return
+        }
+    }
+
     /** @return false si déjà présent dans les téléchargements. */
     fun start(key: String, title: String, icon: String?, url: String, ext: String): Boolean {
         if (isDownloaded(key)) return false
@@ -95,6 +175,14 @@ class Downloads(private val ctx: Context) {
     }
 
     fun list(): List<DownloadInfo> {
+        pump()
+        val queued = queue().mapIndexed { i, q ->
+            DownloadInfo(DownloadRecord(-1L, q.key, q.title, q.icon, ""), DlState.QUEUED, 0f, File(dir(), ""), i + 1)
+        }
+        return queued + listStarted()
+    }
+
+    private fun listStarted(): List<DownloadInfo> {
         val recs = records()
         if (recs.isEmpty()) return emptyList()
         val status = HashMap<Long, Triple<Int, Long, Long>>()
@@ -128,8 +216,21 @@ class Downloads(private val ctx: Context) {
     }
 
     fun delete(r: DownloadRecord) {
-        runCatching { dm.remove(r.downloadId) }
+        if (r.downloadId < 0) {
+            // Pas encore lancé : on le retire simplement de la file.
+            synchronized(LOCK) { saveQueue(queue().filter { it.key != r.key }) }
+            return
+        }        runCatching { dm.remove(r.downloadId) }
         fileOf(r).delete()
         saveRecords(records().filter { it.downloadId != r.downloadId })
+        pump()
+    }
+
+    /** Vide la file d'attente (les téléchargements déjà lancés continuent). */
+    fun clearQueue() = synchronized(LOCK) { saveQueue(emptyList()) }
+
+    companion object {
+        /** Verrou commun à toutes les instances (écran + récepteur de fin de téléchargement). */
+        private val LOCK = Any()
     }
 }

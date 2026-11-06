@@ -30,5 +30,14 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:theme="@style/Theme.MonIPTV.Player" />
+
+        <!-- Fin d'un téléchargement : lance le suivant de la file (saison complète). -->
+        <receiver
+            android:name=".DownloadDoneReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

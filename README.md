@@ -54,4 +54,5 @@ la configuration (la clé de signature `app/moniptv.jks` est fixe — gardez-la)
   et la note (comptes Xtream Codes ; les playlists M3U ne fournissent pas de résumé).
 - **Tri** : films et séries sont rangés du dernier ajouté au premier, dans chaque catégorie et dans la recherche.
 - **Films et Séries** : même barre de recherche compacte et même sélecteur « Catégorie » (liste déroulante) dans les deux onglets.
+- **Télécharger une saison complète** : dans l'écran d'une série, bouton « Télécharger la saison N ». Les épisodes sont mis en file d'attente et téléchargés l'un après l'autre (même appli fermée) ; suivi et annulation dans « Hors ligne ».
 - **Replier les catégories** : dans la vue « Toutes », touchez le titre d'une catégorie pour la replier ou la déplier ; « Tout replier » / « Tout déplier » à droite du nombre de titres. Le choix est mémorisé.

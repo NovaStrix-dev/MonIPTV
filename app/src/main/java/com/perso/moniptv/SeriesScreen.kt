@@ -17,7 +17,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -47,7 +53,17 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
     var plotOpen by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var season by remember { mutableStateOf<Int?>(null) }
-    var dlKeys by remember { mutableStateOf(vm.downloads.records().map { it.key }.toSet()) }
+    // Épisodes téléchargés, en cours ou en file d'attente.
+    var dlKeys by remember {
+        mutableStateOf(vm.downloads.records().map { it.key }.toSet() + vm.downloads.queue().map { it.key })
+    }
+    var confirmSeason by remember { mutableStateOf<Int?>(null) }
+
+    fun episodeKey(e: Episode) = "ep:${series.id}:${e.id}"
+    fun episodeLabel(e: Episode) = "S%02dE%02d".format(e.season, e.number)
+    fun queued(e: Episode) = QueuedDownload(
+        episodeKey(e), "${series.name} - ${episodeLabel(e)} - ${e.title}", series.icon, e.url, e.ext,
+    )
 
     LaunchedEffect(series.id) {
         try {
@@ -116,10 +132,34 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                             }
                         }
                     }
+                    // #16 : télécharger toute la saison affichée (épisodes mis en file, un à la fois).
+                    val seasonEps = eps.filter { it.season == current }
+                    val missing = seasonEps.count { episodeKey(it) !in dlKeys }
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedButton(
+                            onClick = { confirmSeason = current },
+                            enabled = missing > 0,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                        ) {
+                            Icon(
+                                if (missing > 0) Icons.Filled.Download else Icons.Filled.DownloadDone,
+                                null,
+                                Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (missing > 0) "Télécharger la saison $current" else "Saison $current téléchargée",
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        }
+                    }
                     LazyColumn(Modifier.fillMaxSize()) {
-                        items(eps.filter { it.season == current }) { e ->
-                            val key = "ep:${series.id}:${e.id}"
-                            val label = "S%02dE%02d".format(e.season, e.number)
+                        items(seasonEps) { e ->
+                            val key = episodeKey(e)
+                            val label = episodeLabel(e)
                             val meta = e.watchMeta(series)
                             val started = vm.watching.firstOrNull { it.meta.key == meta.key }
                             ListItem(
@@ -141,9 +181,10 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                                             if (key in dlKeys) {
                                                 Toast.makeText(ctx, "Déjà dans « Hors ligne »", Toast.LENGTH_SHORT).show()
                                             } else {
-                                                vm.downloads.start(key, "${series.name} - $label - ${e.title}", series.icon, e.url, e.ext)
+                                                // Passe par la file : ne démarre qu'une fois les téléchargements en cours finis.
+                                                vm.downloads.enqueue(listOf(queued(e)))
                                                 dlKeys = dlKeys + key
-                                                Toast.makeText(ctx, "Téléchargement lancé", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(ctx, "Ajouté à « Hors ligne »", Toast.LENGTH_SHORT).show()
                                             }
                                         }) {
                                             Icon(if (key in dlKeys) Icons.Filled.DownloadDone else Icons.Filled.Download, "Télécharger")
@@ -160,5 +201,30 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    confirmSeason?.let { sn ->
+        val toGet = episodes.orEmpty().filter { it.season == sn && episodeKey(it) !in dlKeys }
+        AlertDialog(
+            onDismissRequest = { confirmSeason = null },
+            title = { Text("Télécharger la saison $sn ?") },
+            text = {
+                Text(
+                    "${toGet.size} épisode(s) à télécharger. Ils seront téléchargés l'un après l'autre " +
+                        "(beaucoup de fournisseurs n'acceptent qu'une connexion à la fois), même appli fermée.\n\n" +
+                        "Pendant ce temps, la lecture en ligne peut être refusée par le fournisseur. " +
+                        "Suivi et annulation dans l'onglet « Hors ligne »."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val n = vm.downloads.enqueue(toGet.map { queued(it) })
+                    dlKeys = dlKeys + toGet.map { episodeKey(it) }
+                    confirmSeason = null
+                    Toast.makeText(ctx, "$n épisode(s) ajouté(s) à « Hors ligne »", Toast.LENGTH_SHORT).show()
+                }) { Text("Télécharger") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSeason = null }) { Text("Annuler") } },
+        )
     }
 }
