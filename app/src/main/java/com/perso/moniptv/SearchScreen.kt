@@ -105,11 +105,11 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
             ) {
                 if (showMovies && results.movies.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Films (${results.movies.size})") }
-                    items(results.movies) { m -> PosterCard(m, movieCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }) { selectedMovie = m } }
+                    items(results.movies) { m -> PosterCard(m, movieCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }, watched = vm.isWatched(m)) { selectedMovie = m } }
                 }
                 if (showSeries && results.series.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Séries (${results.series.size})") }
-                    items(results.series) { m -> PosterCard(m, seriesCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }) { onOpenSeries(m) } }
+                    items(results.series) { m -> PosterCard(m, seriesCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }, watched = vm.isWatched(m)) { onOpenSeries(m) } }
                 }
             }
         }

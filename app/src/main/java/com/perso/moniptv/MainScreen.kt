@@ -32,6 +32,9 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -587,6 +590,7 @@ fun BrowseScreen(
                             m, subtitle,
                             favorite = vm.isFavorite(m),
                             onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) },
+                            watched = vm.isWatched(m),
                         ) {
                             if (type == ContentType.SERIES) onOpenSeries(m) else selectedMovie = m
                         }
@@ -750,6 +754,7 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(m.name, Modifier.weight(1f))
+                WatchedButton(vm.isWatched(m)) { toggleWatchedWithToast(ctx, vm, m) }
                 FavoriteButton(vm.isFavorite(m)) { toggleFavoriteWithToast(ctx, vm, m) }
             }
         },
@@ -759,6 +764,15 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
                     Poster(m.icon, m.name, Modifier.width(90.dp))
                     Spacer(Modifier.width(12.dp))
                     Column {
+                        vm.watched[Favorites.key(m)]?.let { at ->
+                            WatchedBadge()
+                            Text(
+                                "Déjà vu le " + dayFormat.format(Date(at)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = WATCHED_BLUE,
+                                modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                            )
+                        }
                         details?.facts?.takeIf { it.isNotEmpty() }?.let {
                             Text(
                                 it,
@@ -911,11 +925,13 @@ fun PosterCard(
     subtitle: String?,
     favorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    watched: Boolean = false,
     onClick: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onToggleFavorite)) {
         Box {
             Poster(m.icon, m.name, Modifier.fillMaxWidth())
+            if (watched) WatchedBadge(Modifier.align(Alignment.TopStart).padding(6.dp))
             if (onToggleFavorite != null || favorite) {
                 // Zone tactile de 40 dp, pastille visible de 26 dp.
                 Box(
@@ -1078,6 +1094,44 @@ private fun CategoryDropdown(
 }
 
 /** Cœur plein (favori) ou vide, pour ajouter / retirer un titre des favoris. */
+/** Pastille « Vu » en haut à gauche d'une affiche (#19). */
+@Composable
+fun WatchedBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier.clip(RoundedCornerShape(10.dp)).background(WATCHED_BLUE.copy(alpha = 0.92f))
+            .padding(start = 4.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(12.dp))
+        Spacer(Modifier.width(2.dp))
+        Text("Vu", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+val WATCHED_BLUE = Color(0xFF4F8CFF)
+
+/** Bouton « Déjà vu » (coche) des fiches film et série (#19). */
+@Composable
+fun WatchedButton(watched: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(
+            if (watched) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
+            contentDescription = if (watched) "Marquer comme non vu" else "Marquer comme vu",
+            tint = if (watched) WATCHED_BLUE else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+fun toggleWatchedWithToast(ctx: Context, vm: AppViewModel, m: Media, episodeKeys: List<String> = emptyList()) {
+    val now = !vm.isWatched(m)
+    vm.setWatched(m, now, episodeKeys)
+    Toast.makeText(
+        ctx,
+        if (now) "« ${m.name} » marqué comme vu" else "« ${m.name} » marqué comme non vu",
+        Toast.LENGTH_SHORT,
+    ).show()
+}
+
 @Composable
 fun FavoriteButton(favorite: Boolean, onClick: () -> Unit) {
     IconButton(onClick = onClick) {

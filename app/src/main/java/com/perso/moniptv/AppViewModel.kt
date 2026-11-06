@@ -38,6 +38,51 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** À appeler au retour du lecteur : la position vient d'être enregistrée. */
     fun reloadWatching() {
         watching = WatchProgress.all(ctx)
+        watched = Watched.all(ctx)
+    }
+
+    /** « Déjà vu » (#19) : clé (voir [Watched]) → date. */
+    var watched by mutableStateOf(Watched.all(ctx))
+        private set
+
+    fun isWatched(m: Media): Boolean = Favorites.key(m) in watched
+
+    fun isEpisodeWatched(key: String): Boolean = key in watched
+
+    /**
+     * Marque un film ou une série comme vu (ou non vu).
+     * Pour une série, [episodeKeys] (s'ils sont connus) suivent le même état ; démarquer une série démarque
+     * aussi tous ses épisodes. Un titre marqué vu sort de « En cours ».
+     */
+    fun setWatched(m: Media, value: Boolean, episodeKeys: List<String> = emptyList()) {
+        val key = Favorites.key(m)
+        if (value) {
+            Watched.mark(ctx, listOf(key) + episodeKeys)
+            if (m.type == ContentType.SERIES) WatchProgress.removeSeries(ctx, m.id) else WatchProgress.remove(ctx, key)
+        } else {
+            Watched.unmark(ctx, listOf(key))
+            if (m.type == ContentType.SERIES) Watched.unmarkEpisodes(ctx, m.id)
+        }
+        reloadWatching()
+    }
+
+    /** Marque un épisode comme vu ou non vu. Démarquer un épisode démarque aussi la série. */
+    fun setEpisodeWatched(series: Media, key: String, value: Boolean) {
+        if (value) {
+            Watched.mark(ctx, listOf(key))
+            WatchProgress.all(ctx).firstOrNull { it.meta.key == key }?.let { WatchProgress.removeSeries(ctx, series.id) }
+        } else {
+            Watched.unmark(ctx, listOf(key, Favorites.key(series)))
+        }
+        reloadWatching()
+    }
+
+    /** Tous les épisodes vus : la série devient « vue » (sans toucher à « En cours »). */
+    fun markSeriesWatchedIfComplete(series: Media, episodeKeys: List<String>) {
+        val key = Favorites.key(series)
+        if (episodeKeys.isEmpty() || key in watched || !episodeKeys.all { it in watched }) return
+        Watched.mark(ctx, listOf(key))
+        watched = Watched.all(ctx)
     }
 
     /** Favoris : clé (voir [Favorites.key]) → date d'ajout aux favoris. */

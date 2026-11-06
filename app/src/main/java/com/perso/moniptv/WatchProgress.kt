@@ -96,6 +96,7 @@ object WatchProgress {
     fun record(ctx: Context, meta: WatchMeta, position: Long, duration: Long) {
         val others = all(ctx).filter { it.meta.key != meta.key }
         val finished = duration > 0 && (position > duration - END_MARGIN_MS || position > duration * 0.95)
+        if (finished) Watched.mark(ctx, listOf(meta.key)) // « Déjà vu » (#19)
         if (finished || position < MIN_WATCHED_MS) {
             // Terminé : on le retire. Juste ouvert : on garde l'ancienne position si elle existait.
             val old = all(ctx).firstOrNull { it.meta.key == meta.key }

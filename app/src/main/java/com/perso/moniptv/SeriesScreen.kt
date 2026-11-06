@@ -15,6 +15,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlayArrow
@@ -78,6 +81,11 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
         }
     }
 
+    // Tous les épisodes vus : la série passe en « Vu » (#19).
+    LaunchedEffect(episodes, vm.watched) {
+        episodes?.let { eps -> vm.markSeriesWatchedIfComplete(series, eps.map { episodeKey(it) }) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -86,6 +94,9 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
                 },
                 actions = {
+                    WatchedButton(vm.isWatched(series)) {
+                        toggleWatchedWithToast(ctx, vm, series, episodes.orEmpty().map { episodeKey(it) })
+                    }
                     FavoriteButton(vm.isFavorite(series)) { toggleFavoriteWithToast(ctx, vm, series) }
                 },
             )
@@ -185,11 +196,20 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                             val label = episodeLabel(e)
                             val meta = e.watchMeta(series)
                             val started = vm.watching.firstOrNull { it.meta.key == meta.key }
+                            val seen = vm.isEpisodeWatched(key)
                             ListItem(
                                 headlineContent = { Text(e.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                                 supportingContent = {
                                     Column {
-                                        Text(if (started != null) "$label · en cours, arrêté à ${formatTime(started.position)}" else label)
+                                        when {
+                                            started != null -> Text("$label · en cours, arrêté à ${formatTime(started.position)}")
+                                            seen -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("$label · ")
+                                                Icon(Icons.Filled.Check, null, tint = WATCHED_BLUE, modifier = Modifier.size(14.dp))
+                                                Text(" Vu", color = WATCHED_BLUE)
+                                            }
+                                            else -> Text(label)
+                                        }
                                         if (started != null && started.duration > 0) {
                                             LinearProgressIndicator(
                                                 progress = { started.progress },
@@ -200,6 +220,13 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                                 },
                                 trailingContent = {
                                     Row {
+                                        IconButton(onClick = { vm.setEpisodeWatched(series, key, !seen) }) {
+                                            Icon(
+                                                if (seen) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
+                                                if (seen) "Marquer comme non vu" else "Marquer comme vu",
+                                                tint = if (seen) WATCHED_BLUE else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                            )
+                                        }
                                         IconButton(onClick = {
                                             if (key in dlKeys) {
                                                 Toast.makeText(ctx, "Déjà dans « Hors ligne »", Toast.LENGTH_SHORT).show()

@@ -54,6 +54,10 @@ la configuration (la clé de signature `app/moniptv.jks` est fixe — gardez-la)
 - **En cours** : pour retirer un film ou une série, touchez la petite croix en haut à droite de sa case
   (ou appui long → « Retirer de « En cours » »). Une série peut aussi être retirée depuis son écran
   (ligne « En cours » sous la barre du haut). Elle revient si vous regardez à nouveau un de ses épisodes.
+- **Déjà vu** : un film ou un épisode regardé jusqu'au bout est marqué **Vu** automatiquement (pastille bleue
+  en haut à gauche de l'affiche). Une série devient « Vu » quand tous ses épisodes sont vus. Pour marquer ou démarquer
+  à la main : la coche de la fiche d'un film, la coche en haut de l'écran d'une série (marque tous ses épisodes),
+  ou la coche à côté de chaque épisode.
 - **Synopsis** : la fiche d'un film et l'écran d'une série affichent le résumé, l'année, le genre, la durée
   et la note (comptes Xtream Codes ; les playlists M3U ne fournissent pas de résumé).
 - **Tri** : films et séries sont rangés du dernier ajouté au premier, dans chaque catégorie et dans la recherche.
