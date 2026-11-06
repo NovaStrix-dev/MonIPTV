@@ -220,7 +220,8 @@ class Downloads(private val ctx: Context) {
             // Pas encore lancé : on le retire simplement de la file.
             synchronized(LOCK) { saveQueue(queue().filter { it.key != r.key }) }
             return
-        }        runCatching { dm.remove(r.downloadId) }
+        }
+        runCatching { dm.remove(r.downloadId) }
         fileOf(r).delete()
         saveRecords(records().filter { it.downloadId != r.downloadId })
         pump()
