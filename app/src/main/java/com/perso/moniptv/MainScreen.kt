@@ -336,13 +336,8 @@ fun BrowseScreen(
     val watching = remember(vm.watching, type) {
         if (type == ContentType.LIVE) emptyList() else vm.watching.filter { it.meta.type == type }
     }
-    // Si la liste « En cours » se vide pendant qu'on la regarde, on revient à « Toutes ».
-    LaunchedEffect(watching.isEmpty()) { if (watching.isEmpty() && cat == WATCH_CAT) cat = null }
-    val shownWatching = when {
-        cat == WATCH_CAT -> watching
-        cat == null -> watching.take(WATCH_PREVIEW)
-        else -> emptyList()
-    }
+    // « En cours » n'apparaît que dans sa propre catégorie (#23) ; la vue « Toutes » n'a plus de blocs.
+    val shownWatching = if (cat == WATCH_CAT) watching else emptyList()
 
     // Toutes les listes vont du dernier ajouté au premier (titres sans date à la fin, dans leur ordre).
     val sorted = remember(items) { items.newestFirst() }
@@ -366,9 +361,7 @@ fun BrowseScreen(
         }
     }
 
-    // Vue « Toutes » (#22) : plus de blocs par catégorie ; Favoris et Nouveautés en tête, puis tous les titres.
-    val allTitle = if (type == ContentType.SERIES) "Toutes les séries" else "Tous les films"
-    val sections by produceState<List<Section>?>(initialValue = null, sorted, cat, recent, favs, watching.isEmpty()) {
+    val sections by produceState<List<Section>?>(initialValue = null, sorted, cat, recent, favs) {
         val items = sorted
         value = withContext(Dispatchers.Default) {
             when {
@@ -377,18 +370,8 @@ fun BrowseScreen(
                 cat == FAV_CAT -> listOf(Section("", favs))
                 cat != null -> listOf(Section("", items.filter { it.categoryId == cat }))
                 type == ContentType.LIVE -> listOf(Section("", items))
-                else -> {
-                    val out = ArrayList<Section>()
-                    if (favs.isNotEmpty()) {
-                        out.add(Section("Favoris", favs.take(FAV_PREVIEW), id = FAV_CAT, seeAll = FAV_CAT))
-                    }
-                    if (recent.isNotEmpty()) {
-                        out.add(Section("Nouveautés", recent.take(NEW_PREVIEW), id = NEW_CAT, seeAll = NEW_CAT, showDates = true))
-                    }
-                    if (out.isEmpty() && watching.isEmpty()) out.add(Section("", items))
-                    else out.add(Section(allTitle, items, id = ALL_ID))
-                    out
-                }
+                // « Toutes » (#23) : une seule grille avec tous les titres, sans blocs ni titres de section.
+                else -> listOf(Section("", items))
             }
         }
     }
@@ -422,7 +405,7 @@ fun BrowseScreen(
             categories = categories,
             counts = catCounts,
             total = items.size,
-            watchingCount = if (type == ContentType.LIVE) 0 else watching.size,
+            watchingCount = if (type == ContentType.LIVE) -1 else watching.size,
             favCount = if (type == ContentType.LIVE) -1 else favs.size,
             recentCount = recent.size,
             onSelect = { cat = it },
@@ -464,7 +447,8 @@ fun BrowseScreen(
                 list == null -> CenterMessage("", loading = true)
                 list.all { it.items.isEmpty() } && shownWatching.isEmpty() -> CenterMessage(
                     when (cat) {
-                        NEW_CAT -> "Aucune nouveauté pour le moment."
+                        WATCH_CAT -> "Rien en cours pour le moment.\n\nUn film ou un épisode apparaît ici après 20 secondes de visionnage."
+                    NEW_CAT -> "Aucune nouveauté pour le moment."
                         FAV_CAT -> "Aucun favori pour l'instant.\n\nTouchez le petit cœur en haut à droite d'une affiche, " +
                             "ou celui de la fiche d'un film ou d'une série."
                         else -> "Aucun résultat"
@@ -989,7 +973,8 @@ private fun CategoryColumn(
         contentPadding = PaddingValues(vertical = 6.dp),
     ) {
         item { CategoryItem("Toutes", total, selected == null) { onSelect(null) } }
-        if (watchingCount > 0) item { CategoryItem("En cours", watchingCount, selected == WATCH_CAT, Icons.Filled.History) { onSelect(WATCH_CAT) } }
+        // « En cours » toujours affiché au-dessus de « Favoris », même à 0 (#23). Négatif : chaînes TV, pas de « En cours ».
+        if (watchingCount >= 0) item { CategoryItem("En cours", watchingCount, selected == WATCH_CAT, Icons.Filled.History) { onSelect(WATCH_CAT) } }
         if (favCount >= 0) item { CategoryItem("Favoris", favCount, selected == FAV_CAT, Icons.Filled.Favorite) { onSelect(FAV_CAT) } }
         if (recentCount > 0) item { CategoryItem("Nouveautés", recentCount, selected == NEW_CAT, Icons.Filled.NewReleases) { onSelect(NEW_CAT) } }
         item { HorizontalDivider(Modifier.padding(vertical = 4.dp, horizontal = 8.dp)) }
