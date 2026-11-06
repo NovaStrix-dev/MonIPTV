@@ -14,12 +14,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.text.style.TextOverflow
+import android.view.KeyEvent
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.getValue
@@ -56,6 +65,12 @@ class PlayerActivity : ComponentActivity() {
     private var live = false
     private var meta: WatchMeta? = null
 
+    /** Zapping (#17) : chaînes de la catégorie choisie et position de la chaîne en cours. */
+    private var channels: List<LiveChannel> = emptyList()
+    private var groupName: String = ""
+    private var channelIndex by mutableStateOf(-1)
+    private var channelName by mutableStateOf("")
+
     /** Anciennes positions (versions précédentes de l'appli), clé = adresse de lecture. */
     private val legacyPositions by lazy { getSharedPreferences("positions", MODE_PRIVATE) }
     private val settings by lazy { getSharedPreferences("player", MODE_PRIVATE) }
@@ -70,6 +85,16 @@ class PlayerActivity : ComponentActivity() {
         url = intent.getStringExtra(EXTRA_URL) ?: ""
         live = intent.getBooleanExtra(EXTRA_LIVE, false)
         meta = intent.getStringExtra(EXTRA_META)?.let { decodeMeta(it) }
+        if (live) {
+            channels = LivePlaylist.channels
+            groupName = LivePlaylist.groupName
+            channelName = intent.getStringExtra(EXTRA_TITLE) ?: ""
+            // Après une rotation ou un retour dans l'appli, on reprend la dernière chaîne regardée.
+            savedInstanceState?.getString(STATE_URL)?.let { url = it }
+            savedInstanceState?.getString(STATE_NAME)?.let { channelName = it }
+            channelIndex = channels.indexOfFirst { it.url == url }
+            if (channelIndex < 0) channels = emptyList()
+        }
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         playerView = PlayerView(this).apply {
@@ -112,6 +137,38 @@ class PlayerActivity : ComponentActivity() {
                             }
                         }
                     }
+                    // Zapping (#17) : chaîne précédente / suivante dans la même catégorie.
+                    if (live && channels.size > 1 && controlsVisible) {
+                        Column(
+                            Modifier.align(Alignment.CenterEnd).padding(end = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            ZapButton(Icons.Filled.KeyboardArrowUp, "Chaîne précédente") { zap(-1) }
+                            Spacer(Modifier.height(12.dp))
+                            ZapButton(Icons.Filled.KeyboardArrowDown, "Chaîne suivante") { zap(+1) }
+                        }
+                    }
+                    // Nom de la chaîne et position dans la catégorie.
+                    if (live && controlsVisible && channelName.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = androidx.compose.ui.graphics.Color(0x99000000),
+                            contentColor = androidx.compose.ui.graphics.Color.White,
+                            modifier = Modifier.align(Alignment.TopStart).padding(16.dp).widthIn(max = 420.dp),
+                        ) {
+                            Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                                Text(channelName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                                if (channels.size > 1 && channelIndex >= 0) {
+                                    Text(
+                                        "$groupName · ${channelIndex + 1}/${channels.size}",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     if (styleDialog) {
                         SubtitleStyleDialog(
                             style = subStyle,
@@ -138,6 +195,42 @@ class PlayerActivity : ComponentActivity() {
             return
         }
         intent.getStringExtra(EXTRA_TITLE)?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (live) {
+            outState.putString(STATE_URL, url)
+            outState.putString(STATE_NAME, channelName)
+        }
+    }
+
+    /** Touches télécommande / clavier : chaîne + / chaîne - (et haut / bas quand les commandes sont masquées). */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (live && channels.size > 1) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { zap(-1); return true }
+                KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT -> { zap(+1); return true }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    /** Passe à la chaîne voisine de la même catégorie (on boucle au début / à la fin de la liste). */
+    private fun zap(step: Int) {
+        if (channels.size < 2) return
+        val start = if (channelIndex < 0) 0 else channelIndex
+        val i = Math.floorMod(start + step, channels.size)
+        val c = channels[i]
+        channelIndex = i
+        channelName = c.name
+        url = c.url
+        player?.let { p ->
+            p.setMediaItem(mediaItemFor(url))
+            p.playWhenReady = true
+            p.prepare()
+        }
+        playerView.showController()
     }
 
     override fun onStart() {
@@ -196,11 +289,7 @@ class PlayerActivity : ComponentActivity() {
             override fun onTracksChanged(tracks: Tracks) = rememberSubtitleChoice(tracks)
         })
 
-        val item = MediaItem.Builder().setUri(url)
-        if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) {
-            item.setMimeType(MimeTypes.APPLICATION_M3U8)
-        }
-        p.setMediaItem(item.build())
+        p.setMediaItem(mediaItemFor(url))
         if (!live) {
             val pos = meta?.let { WatchProgress.position(this, it.key) }?.takeIf { it > 0 }
                 ?: legacyPositions.getLong(url, 0L)
@@ -210,6 +299,14 @@ class PlayerActivity : ComponentActivity() {
         p.prepare()
         playerView.player = p
         player = p
+    }
+
+    private fun mediaItemFor(u: String): MediaItem {
+        val item = MediaItem.Builder().setUri(u)
+        if (u.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) {
+            item.setMimeType(MimeTypes.APPLICATION_M3U8)
+        }
+        return item.build()
     }
 
     /** Mémorise la langue des sous-titres choisie (ou « aucun ») pour les prochaines lectures. */
@@ -258,6 +355,9 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_LIVE = "live"
         private const val EXTRA_META = "meta"
 
+        private const val STATE_URL = "zap_url"
+        private const val STATE_NAME = "zap_name"
+
         private const val PREF_SUB_LANG = "subtitle_lang"
         private const val SUB_OFF = "off"
         private const val SUB_UND = "und"
@@ -270,6 +370,17 @@ class PlayerActivity : ComponentActivity() {
                     .putExtra(EXTRA_LIVE, live)
                     .putExtra(EXTRA_META, meta?.let { encodeMeta(it) })
             )
+        }
+
+        /**
+         * Lance une chaîne TV en donnant au lecteur les chaînes de la catégorie affichée (#17).
+         * La liste reste en mémoire (elle peut contenir des milliers de chaînes, trop pour un Intent).
+         */
+        fun startLive(ctx: Context, list: List<Media>, current: Media, group: String) {
+            val url = current.url ?: return
+            LivePlaylist.channels = list.mapNotNull { m -> m.url?.let { LiveChannel(m.name, it) } }
+            LivePlaylist.groupName = group
+            start(ctx, url, current.name, live = true)
         }
 
         private fun encodeMeta(m: WatchMeta): String = JSONObject()
@@ -290,5 +401,26 @@ class PlayerActivity : ComponentActivity() {
                 seriesId = o.optString("seriesId").ifEmpty { null },
             )
         }.getOrNull()
+    }
+}
+
+/** Une chaîne de la liste de zapping. */
+data class LiveChannel(val name: String, val url: String)
+
+/** Chaînes de la catégorie ouverte au moment de lancer le direct (#17). */
+object LivePlaylist {
+    @Volatile var channels: List<LiveChannel> = emptyList()
+    @Volatile var groupName: String = ""
+}
+
+@androidx.compose.runtime.Composable
+private fun ZapButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = androidx.compose.ui.graphics.Color(0x99000000),
+        contentColor = androidx.compose.ui.graphics.Color.White,
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Icon(icon, contentDescription = label, modifier = Modifier.padding(12.dp).size(32.dp))
     }
 }

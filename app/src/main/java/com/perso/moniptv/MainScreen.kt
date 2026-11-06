@@ -520,8 +520,16 @@ fun BrowseScreen(
                 }
             )
             type == ContentType.LIVE -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                items(list.flatMap { it.items }) { m ->
-                    LiveRow(m) { m.url?.let { PlayerActivity.start(ctx, it, m.name, live = true) } }
+                // Zapping (#17) : le lecteur reçoit les chaînes affichées (catégorie choisie ou recherche)
+                // pour passer à la chaîne suivante / précédente sans quitter cette catégorie.
+                val channels = list.flatMap { it.items }
+                val groupName = when {
+                    query.isNotBlank() -> "Recherche « ${query.trim()} »"
+                    cat == null -> "Toutes les chaînes"
+                    else -> categories.firstOrNull { it.id == cat }?.name ?: "Catégorie"
+                }
+                items(channels) { m ->
+                    LiveRow(m) { m.url?.let { PlayerActivity.startLive(ctx, channels, m, groupName) } }
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                 }
             }
