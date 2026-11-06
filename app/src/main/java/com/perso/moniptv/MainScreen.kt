@@ -91,6 +91,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import kotlinx.coroutines.Dispatchers
@@ -115,6 +118,19 @@ private const val WATCH_CAT = "__en_cours__"
 
 /** Identifiant interne de la catégorie « Favoris ». */
 private const val FAV_CAT = "__favoris__"
+
+/** Identifiant du bloc « Autres » (titres sans catégorie connue). */
+private const val OTHERS_ID = "__autres__"
+
+/** Blocs repliés de la vue « Toutes », mémorisés par onglet (prefs `ui`). */
+private object CollapsedSections {
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("ui", Context.MODE_PRIVATE)
+    fun load(ctx: Context, type: ContentType): Set<String> =
+        prefs(ctx).getStringSet("collapsed_" + type.name, emptySet()).orEmpty().toSet()
+    fun save(ctx: Context, type: ContentType, ids: Set<String>) {
+        prefs(ctx).edit().putStringSet("collapsed_" + type.name, HashSet(ids)).apply()
+    }
+}
 
 /** Nombre de favoris montrés en tête de la vue « Toutes » avant « Tout voir ». */
 private const val FAV_PREVIEW = 12
@@ -285,6 +301,8 @@ fun CenterMessage(text: String, loading: Boolean = false) {
 /** Un bloc de la liste : un titre de catégorie et ses films / séries. */
 private data class Section(
     val title: String,
+    /** Identifiant stable du bloc (pour mémoriser s'il est replié). */
+    val id: String = title,
     val items: List<Media>,
     /** Si non nul : aperçu, avec un bouton « Tout voir » qui ouvre cette catégorie. */
     val seeAll: String? = null,
@@ -358,16 +376,16 @@ fun BrowseScreen(
                     // « Toutes » : films / séries rangés par catégorie, Favoris et Nouveautés en tête.
                     val out = ArrayList<Section>()
                     if (favs.isNotEmpty()) {
-                        out.add(Section("Favoris", favs.take(FAV_PREVIEW), seeAll = FAV_CAT))
+                        out.add(Section("Favoris", favs.take(FAV_PREVIEW), id = FAV_CAT, seeAll = FAV_CAT))
                     }
                     if (recent.isNotEmpty()) {
-                        out.add(Section("Nouveautés", recent.take(NEW_PREVIEW), seeAll = NEW_CAT, showDates = true))
+                        out.add(Section("Nouveautés", recent.take(NEW_PREVIEW), id = NEW_CAT, seeAll = NEW_CAT, showDates = true))
                     }
                     val byCat = items.groupBy { it.categoryId }
-                    categories.forEach { c -> byCat[c.id]?.let { out.add(Section(c.name, it)) } }
+                    categories.forEach { c -> byCat[c.id]?.let { out.add(Section(c.name, it, id = "cat:" + c.id)) } }
                     val known = categories.mapTo(HashSet()) { it.id }
                     val others = items.filter { it.categoryId !in known }
-                    if (others.isNotEmpty()) out.add(Section("Autres", others))
+                    if (others.isNotEmpty()) out.add(Section("Autres", others, id = OTHERS_ID))
                     out
                 }
             }
@@ -375,6 +393,20 @@ fun BrowseScreen(
     }
 
     val gridState = rememberLazyGridState()
+
+    // Blocs repliés de la vue « Toutes » (#15) : toucher le titre d'une catégorie la replie / déplie.
+    // Mémorisé par onglet sur le téléphone.
+    val collapsed = remember(type) { mutableStateListOf<String>().apply { addAll(CollapsedSections.load(ctx, type)) } }
+    fun toggleCollapsed(id: String) {
+        if (id in collapsed) collapsed.remove(id) else collapsed.add(id)
+        CollapsedSections.save(ctx, type, collapsed.toSet())
+    }
+    val allSectionIds = buildList {
+        if (shownWatching.isNotEmpty() && cat == null) add(WATCH_CAT)
+        sections?.forEach { if (it.title.isNotEmpty()) add(it.id) }
+    }
+    val canCollapse = query.isBlank() && cat == null && type != ContentType.LIVE && allSectionIds.isNotEmpty()
+    val allCollapsed = canCollapse && allSectionIds.all { it in collapsed }
 
     // Remonte en haut de la liste quand on change de catégorie ou de recherche.
     LaunchedEffect(cat, query) {
@@ -395,7 +427,7 @@ fun BrowseScreen(
                 placeholder = "Rechercher…",
                 modifier = Modifier.weight(1f),
             )
-            if (query.isBlank() && type == ContentType.MOVIE) {
+            if (query.isBlank() && type != ContentType.LIVE) {
                 CategoryDropdown(
                     selected = cat,
                     categories = categories,
@@ -408,8 +440,8 @@ fun BrowseScreen(
                 )
             }
         }
-        // Séries et TV : rangée de boutons de catégorie (les films ont la liste déroulante ci-dessus).
-        if (query.isBlank() && type != ContentType.MOVIE) {
+        // TV : rangée de boutons de catégorie (films et séries ont la liste déroulante ci-dessus).
+        if (query.isBlank() && type == ContentType.LIVE) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -422,16 +454,6 @@ fun BrowseScreen(
                             onClick = { cat = WATCH_CAT },
                             label = { Text("En cours") },
                             leadingIcon = { Icon(Icons.Filled.History, null, Modifier.size(18.dp)) },
-                        )
-                    }
-                }
-                if (type != ContentType.LIVE) {
-                    item {
-                        FilterChip(
-                            selected = cat == FAV_CAT,
-                            onClick = { cat = FAV_CAT },
-                            label = { Text("Favoris") },
-                            leadingIcon = { Icon(Icons.Filled.Favorite, null, Modifier.size(18.dp)) },
                         )
                     }
                 }
@@ -457,14 +479,35 @@ fun BrowseScreen(
 
         val list = sections
         val total = if (cat == WATCH_CAT) watching.size else list?.filter { it.seeAll == null }?.sumOf { it.items.size } ?: 0
-        Text(
-            buildString {
-                append("$total titre(s)")
-                if (updatedAt > 0) append(" · mis à jour le ").append(dateTimeFormat.format(Date(updatedAt)))
-            },
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 28.dp).padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                buildString {
+                    append("$total titre(s)")
+                    if (updatedAt > 0) append(" · mis à jour le ").append(dateTimeFormat.format(Date(updatedAt)))
+                },
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (canCollapse) {
+                Text(
+                    if (allCollapsed) "Tout déplier" else "Tout replier",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            if (allCollapsed) collapsed.removeAll(allSectionIds)
+                            else allSectionIds.forEach { if (it !in collapsed) collapsed.add(it) }
+                            CollapsedSections.save(ctx, type, collapsed.toSet())
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+        }
 
         when {
             list == null -> CenterMessage("", loading = true)
@@ -492,15 +535,18 @@ fun BrowseScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 if (shownWatching.isNotEmpty()) {
+                    val folded = cat == null && WATCH_CAT in collapsed
                     if (cat != WATCH_CAT) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             SectionHeader(
                                 "En cours",
                                 onSeeAll = if (watching.size > WATCH_PREVIEW) ({ cat = WATCH_CAT }) else null,
+                                collapsed = folded,
+                                onToggle = { toggleCollapsed(WATCH_CAT) },
                             )
                         }
                     }
-                    gridItems(shownWatching, key = { "w:" + it.meta.key }) { e ->
+                    if (!folded) gridItems(shownWatching, key = { "w:" + it.meta.key }) { e ->
                         WatchCard(
                             e,
                             onClick = { vm.play(ctx, e.meta) },
@@ -509,15 +555,18 @@ fun BrowseScreen(
                     }
                 }
                 list.forEach { s ->
+                    val folded = s.title.isNotEmpty() && s.id in collapsed
                     if (s.title.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             SectionHeader(
                                 if (s.seeAll == null) "${s.title} (${s.items.size})" else s.title,
                                 onSeeAll = s.seeAll?.let { target -> { cat = target } },
+                                collapsed = folded,
+                                onToggle = { toggleCollapsed(s.id) },
                             )
                         }
                     }
-                    gridItems(s.items) { m ->
+                    if (!folded) gridItems(s.items) { m ->
                         val subtitle = if (s.showDates && m.added > 0) {
                             "Ajouté le " + dayFormat.format(Date(m.added * 1000))
                         } else {
@@ -744,22 +793,46 @@ fun Poster(icon: String?, name: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Titre d'un bloc de la grille (catégorie), avec « Tout voir » en option. */
+/**
+ * Titre d'un bloc de la grille (catégorie), avec « Tout voir » en option.
+ * Si [onToggle] est fourni, toucher le titre replie / déplie le bloc (flèche à gauche).
+ */
 @Composable
-fun SectionHeader(title: String, onSeeAll: (() -> Unit)? = null) {
+fun SectionHeader(
+    title: String,
+    onSeeAll: (() -> Unit)? = null,
+    collapsed: Boolean = false,
+    onToggle: (() -> Unit)? = null,
+) {
     Row(
         Modifier.fillMaxWidth().padding(top = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        if (onSeeAll != null) {
+        Row(
+            Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                .then(if (onToggle != null) Modifier.clickable(onClick = onToggle) else Modifier)
+                .heightIn(min = 40.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onToggle != null) {
+                Icon(
+                    if (collapsed) Icons.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
+                    if (collapsed) "Déplier" else "Replier",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (onSeeAll != null && !collapsed) {
             TextButton(onClick = onSeeAll) { Text("Tout voir") }
         }
     }
@@ -851,7 +924,7 @@ fun PosterRow(m: Media, subtitle: String?, onClick: () -> Unit) {
 }
 
 
-/** Choix de la catégorie des films : pastille compacte qui ouvre une liste déroulante. */
+/** Choix de la catégorie (films et séries) : pastille compacte qui ouvre une liste déroulante. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CategoryDropdown(

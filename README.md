@@ -53,3 +53,5 @@ la configuration (la clé de signature `app/moniptv.jks` est fixe — gardez-la)
 - **Synopsis** : la fiche d'un film et l'écran d'une série affichent le résumé, l'année, le genre, la durée
   et la note (comptes Xtream Codes ; les playlists M3U ne fournissent pas de résumé).
 - **Tri** : films et séries sont rangés du dernier ajouté au premier, dans chaque catégorie et dans la recherche.
+- **Films et Séries** : même barre de recherche compacte et même sélecteur « Catégorie » (liste déroulante) dans les deux onglets.
+- **Replier les catégories** : dans la vue « Toutes », touchez le titre d'une catégorie pour la replier ou la déplier ; « Tout replier » / « Tout déplier » à droite du nombre de titres. Le choix est mémorisé.
