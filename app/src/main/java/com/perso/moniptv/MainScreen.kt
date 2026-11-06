@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -123,8 +124,8 @@ private const val WATCH_CAT = "__en_cours__"
 /** Identifiant interne de la catégorie « Favoris ». */
 private const val FAV_CAT = "__favoris__"
 
-/** Identifiant du bloc « Autres » (titres sans catégorie connue). */
-private const val OTHERS_ID = "__autres__"
+/** Identifiant du bloc « Tous les films / Toutes les séries » de la vue « Toutes » (#22). */
+private const val ALL_ID = "__tous__"
 
 /** Blocs repliés de la vue « Toutes », mémorisés par onglet (prefs `ui`). */
 private object CollapsedSections {
@@ -345,7 +346,7 @@ fun BrowseScreen(
 
     // Toutes les listes vont du dernier ajouté au premier (titres sans date à la fin, dans leur ordre).
     val sorted = remember(items) { items.newestFirst() }
-    // Nombre de titres par catégorie (affiché dans la liste déroulante des films).
+    // Nombre de titres par catégorie (affiché dans la colonne des catégories).
     val catCounts = remember(items) { items.groupingBy { it.categoryId }.eachCount() }
 
     // Nouveautés : les titres les plus récemment ajoutés (films et séries uniquement).
@@ -365,7 +366,9 @@ fun BrowseScreen(
         }
     }
 
-    val sections by produceState<List<Section>?>(initialValue = null, sorted, cat, recent, favs) {
+    // Vue « Toutes » (#22) : plus de blocs par catégorie ; Favoris et Nouveautés en tête, puis tous les titres.
+    val allTitle = if (type == ContentType.SERIES) "Toutes les séries" else "Tous les films"
+    val sections by produceState<List<Section>?>(initialValue = null, sorted, cat, recent, favs, watching.isEmpty()) {
         val items = sorted
         value = withContext(Dispatchers.Default) {
             when {
@@ -375,7 +378,6 @@ fun BrowseScreen(
                 cat != null -> listOf(Section("", items.filter { it.categoryId == cat }))
                 type == ContentType.LIVE -> listOf(Section("", items))
                 else -> {
-                    // « Toutes » : films / séries rangés par catégorie, Favoris et Nouveautés en tête.
                     val out = ArrayList<Section>()
                     if (favs.isNotEmpty()) {
                         out.add(Section("Favoris", favs.take(FAV_PREVIEW), id = FAV_CAT, seeAll = FAV_CAT))
@@ -383,11 +385,8 @@ fun BrowseScreen(
                     if (recent.isNotEmpty()) {
                         out.add(Section("Nouveautés", recent.take(NEW_PREVIEW), id = NEW_CAT, seeAll = NEW_CAT, showDates = true))
                     }
-                    val byCat = items.groupBy { it.categoryId }
-                    categories.forEach { c -> byCat[c.id]?.let { out.add(Section(c.name, it, id = "cat:" + c.id)) } }
-                    val known = categories.mapTo(HashSet()) { it.id }
-                    val others = items.filter { it.categoryId !in known }
-                    if (others.isNotEmpty()) out.add(Section("Autres", others, id = OTHERS_ID))
+                    if (out.isEmpty() && watching.isEmpty()) out.add(Section("", items))
+                    else out.add(Section(allTitle, items, id = ALL_ID))
                     out
                 }
             }
@@ -396,7 +395,7 @@ fun BrowseScreen(
 
     val gridState = rememberLazyGridState()
 
-    // Blocs repliés de la vue « Toutes » (#15) : toucher le titre d'une catégorie la replie / déplie.
+    // Blocs repliés de la vue « Toutes » (#15) : toucher le titre d'un bloc le replie / déplie.
     // Mémorisé par onglet sur le téléphone.
     val collapsed = remember(type) { mutableStateListOf<String>().apply { addAll(CollapsedSections.load(ctx, type)) } }
     fun toggleCollapsed(id: String) {
@@ -416,175 +415,135 @@ fun BrowseScreen(
         runCatching { gridState.scrollToItem(0) }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        // Films et séries : sélecteur de catégorie compact (40 dp). La recherche se fait dans l'onglet Recherche (#21).
-        if (type != ContentType.LIVE) Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CategoryDropdown(
-                selected = cat,
-                categories = categories,
-                counts = catCounts,
-                watchingCount = watching.size,
-                favCount = favs.size,
-                recentCount = recent.size,
-                onSelect = { cat = it },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        // TV : rangée de boutons de catégorie (films et séries ont la liste déroulante ci-dessus).
-        if (type == ContentType.LIVE) {
-            LazyRow(
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+    // Catégories en colonne à gauche (#22), pour les films, les séries et les chaînes TV.
+    Row(Modifier.fillMaxSize()) {
+        CategoryColumn(
+            selected = cat,
+            categories = categories,
+            counts = catCounts,
+            total = items.size,
+            watchingCount = if (type == ContentType.LIVE) 0 else watching.size,
+            favCount = if (type == ContentType.LIVE) -1 else favs.size,
+            recentCount = recent.size,
+            onSelect = { cat = it },
+        )
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            val list = sections
+            val total = if (cat == WATCH_CAT) watching.size else list?.filter { it.seeAll == null }?.sumOf { it.items.size } ?: 0
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 28.dp).padding(start = 10.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                item { FilterChip(selected = cat == null, onClick = { cat = null }, label = { Text("Toutes") }) }
-                if (watching.isNotEmpty()) {
-                    item {
-                        FilterChip(
-                            selected = cat == WATCH_CAT,
-                            onClick = { cat = WATCH_CAT },
-                            label = { Text("En cours") },
-                            leadingIcon = { Icon(Icons.Filled.History, null, Modifier.size(18.dp)) },
-                        )
-                    }
-                }
-                if (recent.isNotEmpty()) {
-                    item {
-                        FilterChip(
-                            selected = cat == NEW_CAT,
-                            onClick = { cat = NEW_CAT },
-                            label = { Text("Nouveautés") },
-                            leadingIcon = { Icon(Icons.Filled.NewReleases, null, Modifier.size(18.dp)) },
-                        )
-                    }
-                }
-                items(categories) { c ->
-                    FilterChip(
-                        selected = cat == c.id,
-                        onClick = { cat = c.id },
-                        label = { Text(c.name, maxLines = 1) },
+                Text(
+                    buildString {
+                        append("$total titre(s)")
+                        if (updatedAt > 0) append(" · mis à jour le ").append(dateTimeFormat.format(Date(updatedAt)))
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (canCollapse) {
+                    Text(
+                        if (allCollapsed) "Tout déplier" else "Tout replier",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clip(RoundedCornerShape(14.dp))
+                            .clickable {
+                                if (allCollapsed) collapsed.removeAll(allSectionIds)
+                                else allSectionIds.forEach { if (it !in collapsed) collapsed.add(it) }
+                                CollapsedSections.save(ctx, type, collapsed.toSet())
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }
             }
-        }
 
-        val list = sections
-        val total = if (cat == WATCH_CAT) watching.size else list?.filter { it.seeAll == null }?.sumOf { it.items.size } ?: 0
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 28.dp).padding(start = 14.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                buildString {
-                    append("$total titre(s)")
-                    if (updatedAt > 0) append(" · mis à jour le ").append(dateTimeFormat.format(Date(updatedAt)))
-                },
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (canCollapse) {
-                Text(
-                    if (allCollapsed) "Tout déplier" else "Tout replier",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            if (allCollapsed) collapsed.removeAll(allSectionIds)
-                            else allSectionIds.forEach { if (it !in collapsed) collapsed.add(it) }
-                            CollapsedSections.save(ctx, type, collapsed.toSet())
-                        }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
+            when {
+                list == null -> CenterMessage("", loading = true)
+                list.all { it.items.isEmpty() } && shownWatching.isEmpty() -> CenterMessage(
+                    when (cat) {
+                        NEW_CAT -> "Aucune nouveauté pour le moment."
+                        FAV_CAT -> "Aucun favori pour l'instant.\n\nTouchez le petit cœur en haut à droite d'une affiche, " +
+                            "ou celui de la fiche d'un film ou d'une série."
+                        else -> "Aucun résultat"
+                    }
                 )
-            }
-        }
-
-        when {
-            list == null -> CenterMessage("", loading = true)
-            list.all { it.items.isEmpty() } && shownWatching.isEmpty() -> CenterMessage(
-                when (cat) {
-                    NEW_CAT -> "Aucune nouveauté pour le moment."
-                    FAV_CAT -> "Aucun favori pour l'instant.\n\nTouchez le petit cœur en haut à droite d'une affiche, " +
-                        "ou celui de la fiche d'un film ou d'une série."
-                    else -> "Aucun résultat"
+                type == ContentType.LIVE -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                    // Zapping (#17) : le lecteur reçoit les chaînes affichées (catégorie choisie ou recherche)
+                    // pour passer à la chaîne suivante / précédente sans quitter cette catégorie.
+                    val channels = list.flatMap { it.items }
+                    val groupName = when {
+                        cat == null -> "Toutes les chaînes"
+                        else -> categories.firstOrNull { it.id == cat }?.name ?: "Catégorie"
+                    }
+                    items(channels) { m ->
+                        LiveRow(m) { m.url?.let { PlayerActivity.startLive(ctx, channels, m, groupName) } }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    }
                 }
-            )
-            type == ContentType.LIVE -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                // Zapping (#17) : le lecteur reçoit les chaînes affichées (catégorie choisie ou recherche)
-                // pour passer à la chaîne suivante / précédente sans quitter cette catégorie.
-                val channels = list.flatMap { it.items }
-                val groupName = when {
-                    cat == null -> "Toutes les chaînes"
-                    else -> categories.firstOrNull { it.id == cat }?.name ?: "Catégorie"
-                }
-                items(channels) { m ->
-                    LiveRow(m) { m.url?.let { PlayerActivity.startLive(ctx, channels, m, groupName) } }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                }
-            }
-            // Films et séries : grille d'affiches, titre sous chaque affiche, blocs par catégorie.
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(POSTER_MIN_WIDTH),
-                state = gridState,
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                if (shownWatching.isNotEmpty()) {
-                    val folded = cat == null && WATCH_CAT in collapsed
-                    if (cat != WATCH_CAT) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            SectionHeader(
-                                "En cours",
-                                onSeeAll = if (watching.size > WATCH_PREVIEW) ({ cat = WATCH_CAT }) else null,
-                                collapsed = folded,
-                                onToggle = { toggleCollapsed(WATCH_CAT) },
+                // Films et séries : grille d'affiches, titre sous chaque affiche.
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Adaptive(POSTER_MIN_WIDTH),
+                    state = gridState,
+                    contentPadding = PaddingValues(start = 10.dp, end = 10.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    if (shownWatching.isNotEmpty()) {
+                        val folded = cat == null && WATCH_CAT in collapsed
+                        if (cat != WATCH_CAT) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                SectionHeader(
+                                    "En cours",
+                                    onSeeAll = if (watching.size > WATCH_PREVIEW) ({ cat = WATCH_CAT }) else null,
+                                    collapsed = folded,
+                                    onToggle = { toggleCollapsed(WATCH_CAT) },
+                                )
+                            }
+                        }
+                        if (!folded) gridItems(shownWatching, key = { "w:" + it.meta.key }) { e ->
+                            WatchCard(
+                                e,
+                                onClick = { vm.play(ctx, e.meta) },
+                                onLongClick = { watchMenu = e },
+                                onRemove = { watchToRemove = e },
                             )
                         }
                     }
-                    if (!folded) gridItems(shownWatching, key = { "w:" + it.meta.key }) { e ->
-                        WatchCard(
-                            e,
-                            onClick = { vm.play(ctx, e.meta) },
-                            onLongClick = { watchMenu = e },
-                            onRemove = { watchToRemove = e },
-                        )
-                    }
-                }
-                list.forEach { s ->
-                    val folded = s.title.isNotEmpty() && s.id in collapsed
-                    if (s.title.isNotEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            SectionHeader(
-                                if (s.seeAll == null) "${s.title} (${s.items.size})" else s.title,
-                                onSeeAll = s.seeAll?.let { target -> { cat = target } },
-                                collapsed = folded,
-                                onToggle = { toggleCollapsed(s.id) },
-                            )
+                    list.forEach { s ->
+                        val folded = s.title.isNotEmpty() && s.id in collapsed
+                        if (s.title.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                SectionHeader(
+                                    if (s.seeAll == null) "${s.title} (${s.items.size})" else s.title,
+                                    onSeeAll = s.seeAll?.let { target -> { cat = target } },
+                                    collapsed = folded,
+                                    onToggle = { toggleCollapsed(s.id) },
+                                )
+                            }
                         }
-                    }
-                    if (!folded) gridItems(s.items) { m ->
-                        val subtitle = if (s.showDates && m.added > 0) {
-                            "Ajouté le " + dayFormat.format(Date(m.added * 1000))
-                        } else {
-                            null
-                        }
-                        PosterCard(
-                            m, subtitle,
-                            favorite = vm.isFavorite(m),
-                            onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) },
-                            watched = vm.isWatched(m),
-                        ) {
-                            if (type == ContentType.SERIES) onOpenSeries(m) else selectedMovie = m
+                        if (!folded) gridItems(s.items) { m ->
+                            val subtitle = if (s.showDates && m.added > 0) {
+                                "Ajouté le " + dayFormat.format(Date(m.added * 1000))
+                            } else {
+                                null
+                            }
+                            PosterCard(
+                                m, subtitle,
+                                favorite = vm.isFavorite(m),
+                                onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) },
+                                watched = vm.isWatched(m),
+                            ) {
+                                if (type == ContentType.SERIES) onOpenSeries(m) else selectedMovie = m
+                            }
                         }
                     }
                 }
             }
-        }
+    }
     }
 
     selectedMovie?.let { m -> MovieDialog(vm, m) { selectedMovie = null } }
@@ -760,6 +719,8 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
                                 modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
                             )
                         }
+                        // Catégorie du film (#22), avec le synopsis.
+                        vm.catalog?.categoryName(m)?.let { CategoryLabel(it) }
                         details?.facts?.takeIf { it.isNotEmpty() }?.let {
                             Text(
                                 it,
@@ -961,6 +922,19 @@ fun PosterCard(
     }
 }
 
+/** Catégorie d'un film ou d'une série, affichée dans sa fiche (#22). */
+@Composable
+fun CategoryLabel(name: String, modifier: Modifier = Modifier) {
+    Text(
+        "Catégorie : $name",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier.padding(bottom = 6.dp),
+    )
+}
+
 /** Rouge des cœurs de favoris. */
 val FAV_RED = Color(0xFFFF5A6E)
 
@@ -988,94 +962,77 @@ fun PosterRow(m: Media, subtitle: String?, onClick: () -> Unit) {
 }
 
 
-/** Choix de la catégorie (films et séries) : pastille compacte qui ouvre une liste déroulante. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Fond de la colonne des catégories et couleur de la catégorie choisie (charte de l'appli). */
+private val CAT_COLUMN_BG = Color(0xFF151B26)
+private val CAT_SELECTED_BG = Color(0xFF26365A)
+
+/** Largeur de la colonne des catégories : laisse 2 affiches par ligne sur un téléphone en portrait. */
+private val CAT_COLUMN_WIDTH = 116.dp
+
+/**
+ * Catégories en colonne sur la gauche de l'écran (#22), à la place de la liste déroulante (films, séries)
+ * et de la rangée de boutons (TV). [favCount] négatif : pas de favoris (chaînes TV).
+ */
 @Composable
-private fun CategoryDropdown(
+private fun CategoryColumn(
     selected: String?,
     categories: List<Category>,
     counts: Map<String, Int>,
+    total: Int,
     watchingCount: Int,
     favCount: Int,
     recentCount: Int,
     onSelect: (String?) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val label = when (selected) {
-        null -> "Toutes"
-        WATCH_CAT -> "En cours"
-        FAV_CAT -> "Favoris"
-        NEW_CAT -> "Nouveautés"
-        else -> categories.firstOrNull { it.id == selected }?.name ?: "Toutes"
-    }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = modifier,
+    LazyColumn(
+        Modifier.width(CAT_COLUMN_WIDTH).fillMaxHeight().background(CAT_COLUMN_BG),
+        contentPadding = PaddingValues(vertical = 6.dp),
     ) {
-        Row(
-            Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(20.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
-                .padding(start = 12.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Filled.FilterList, "Catégorie", Modifier.size(18.dp),
-                tint = if (selected != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                label,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (selected != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+        item { CategoryItem("Toutes", total, selected == null) { onSelect(null) } }
+        if (watchingCount > 0) item { CategoryItem("En cours", watchingCount, selected == WATCH_CAT, Icons.Filled.History) { onSelect(WATCH_CAT) } }
+        if (favCount >= 0) item { CategoryItem("Favoris", favCount, selected == FAV_CAT, Icons.Filled.Favorite) { onSelect(FAV_CAT) } }
+        if (recentCount > 0) item { CategoryItem("Nouveautés", recentCount, selected == NEW_CAT, Icons.Filled.NewReleases) { onSelect(NEW_CAT) } }
+        item { HorizontalDivider(Modifier.padding(vertical = 4.dp, horizontal = 8.dp)) }
+        items(categories, key = { "c:" + it.id }) { c ->
+            CategoryItem(c.name, counts[c.id] ?: 0, selected == c.id) { onSelect(c.id) }
         }
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            matchTextFieldWidth = false,
-            modifier = Modifier.width(280.dp),
-        ) {
-            @Composable
-            fun option(id: String?, text: String, count: Int?, icon: ImageVector? = null) {
-                DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontWeight = if (id == selected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (id == selected) MaterialTheme.colorScheme.primary else Color.Unspecified,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (count != null) {
-                                Text(
-                                    "$count",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 8.dp),
-                                )
-                            }
-                        }
-                    },
-                    leadingIcon = icon?.let { { Icon(it, null, Modifier.size(18.dp)) } },
-                    onClick = { onSelect(id); expanded = false },
-                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
-                )
-            }
-            option(null, "Toutes les catégories", null)
-            if (watchingCount > 0) option(WATCH_CAT, "En cours", watchingCount, Icons.Filled.History)
-            option(FAV_CAT, "Favoris", favCount, Icons.Filled.Favorite)
-            if (recentCount > 0) option(NEW_CAT, "Nouveautés", recentCount, Icons.Filled.NewReleases)
-            HorizontalDivider()
-            categories.forEach { c -> option(c.id, c.name, counts[c.id] ?: 0) }
+    }
+}
+
+/** Une ligne de la colonne des catégories : nom (2 lignes max.) et nombre de titres. */
+@Composable
+private fun CategoryItem(name: String, count: Int, selected: Boolean, icon: ImageVector? = null, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) CAT_SELECTED_BG else Color.Transparent)
+            .clickable(onClick = onClick)
+            .heightIn(min = 40.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(
+                icon, null, Modifier.size(14.dp),
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(4.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                name,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                "$count",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

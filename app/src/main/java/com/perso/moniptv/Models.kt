@@ -85,3 +85,13 @@ fun Media.matches(words: List<String>): Boolean = words.all { searchKey.contains
 
 /** Tri du dernier ajouté au premier ; les titres sans date gardent leur ordre, après les titres datés. */
 fun List<Media>.newestFirst(): List<Media> = sortedByDescending { it.added }
+
+/** Nom de la catégorie d'un titre (films, séries ou chaînes), null si inconnue (#22). */
+fun Catalog.categoryName(m: Media): String? {
+    val cats = when (m.type) {
+        ContentType.LIVE -> liveCats
+        ContentType.MOVIE -> movieCats
+        ContentType.SERIES -> seriesCats
+    }
+    return cats.firstOrNull { it.id == m.categoryId }?.name?.takeIf { it.isNotBlank() }
+}

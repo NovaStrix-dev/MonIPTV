@@ -136,6 +136,8 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                         Column(Modifier.padding(start = 12.dp)) {
                             Text(series.name, style = MaterialTheme.typography.titleMedium)
                             Text("${seasons.size} saison(s) · ${eps.size} épisode(s)", style = MaterialTheme.typography.bodySmall)
+                            // Catégorie de la série (#22), avec le synopsis.
+                            vm.catalog?.categoryName(series)?.let { CategoryLabel(it, Modifier.padding(top = 2.dp)) }
                             details?.facts?.takeIf { it.isNotEmpty() }?.let {
                                 Text(
                                     it,

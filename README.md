@@ -62,7 +62,7 @@ la configuration (la clé de signature `app/moniptv.jks` est fixe — gardez-la)
 - **Synopsis** : la fiche d'un film et l'écran d'une série affichent le résumé, l'année, le genre, la durée
   et la note (comptes Xtream Codes ; les playlists M3U ne fournissent pas de résumé).
 - **Tri** : films et séries sont rangés du dernier ajouté au premier, dans chaque catégorie et dans la recherche.
-- **Films et Séries** : même sélecteur « Catégorie » (liste déroulante) dans les deux onglets.
+- **Catégories en colonne à gauche** (Films, Séries et TV) : touchez une catégorie pour n'afficher qu'elle. La vue « Toutes » montre En cours, Favoris, Nouveautés puis tous les titres (plus de blocs par catégorie). La catégorie d'un film ou d'une série est indiquée dans sa fiche, avec le synopsis.
 - **Onglets en haut** : TV, Films, Séries, Recherche et Hors ligne sont en haut de l'écran. La recherche se fait uniquement dans l'onglet **Recherche** (plus de champ de recherche dans les onglets Films, Séries et TV).
 - **Télécharger une saison complète** : dans l'écran d'une série, bouton « Télécharger la saison N ». Les épisodes sont mis en file d'attente et téléchargés l'un après l'autre (même appli fermée) ; suivi et annulation dans « Hors ligne ».
-- **Replier les catégories** : dans la vue « Toutes », touchez le titre d'une catégorie pour la replier ou la déplier ; « Tout replier » / « Tout déplier » à droite du nombre de titres. Le choix est mémorisé.
+- **Replier les blocs** : dans la vue « Toutes », touchez le titre d'un bloc (En cours, Favoris, Nouveautés, tous les titres) pour le replier ou le déplier ; « Tout replier » / « Tout déplier » à droite du nombre de titres. Le choix est mémorisé.
