@@ -301,12 +301,12 @@ fun CenterMessage(text: String, loading: Boolean = false) {
 /** Un bloc de la liste : un titre de catégorie et ses films / séries. */
 private data class Section(
     val title: String,
-    /** Identifiant stable du bloc (pour mémoriser s'il est replié). */
-    val id: String = title,
     val items: List<Media>,
     /** Si non nul : aperçu, avec un bouton « Tout voir » qui ouvre cette catégorie. */
     val seeAll: String? = null,
     val showDates: Boolean = false,
+    /** Identifiant stable du bloc (pour mémoriser s'il est replié). */
+    val id: String = title,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
