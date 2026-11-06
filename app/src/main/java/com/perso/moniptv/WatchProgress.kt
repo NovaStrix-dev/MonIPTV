@@ -107,9 +107,22 @@ object WatchProgress {
         save(ctx, kept + WatchEntry(meta, position, duration, System.currentTimeMillis()))
     }
 
+    /**
+     * Retire un titre de « En cours ». Pour un épisode, toute la série est retirée
+     * (y compris d'éventuelles anciennes entrées d'autres épisodes de la même série).
+     */
     @Synchronized
     fun remove(ctx: Context, key: String) {
-        save(ctx, all(ctx).filter { it.meta.key != key })
+        val list = all(ctx)
+        val seriesId = list.firstOrNull { it.meta.key == key }?.meta?.seriesId
+            ?: key.takeIf { it.startsWith("ep:") }?.split(':')?.getOrNull(1)
+        save(ctx, list.filter { it.meta.key != key && (seriesId == null || it.meta.seriesId != seriesId) })
+    }
+
+    /** Retire de « En cours » tous les épisodes d'une série. */
+    @Synchronized
+    fun removeSeries(ctx: Context, seriesId: String) {
+        save(ctx, all(ctx).filter { it.meta.seriesId != seriesId })
     }
 
     @Synchronized

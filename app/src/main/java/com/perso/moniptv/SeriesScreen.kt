@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -58,6 +59,8 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
         mutableStateOf(vm.downloads.records().map { it.key }.toSet() + vm.downloads.queue().map { it.key })
     }
     var confirmSeason by remember { mutableStateOf<Int?>(null) }
+    var confirmRemoveWatching by remember { mutableStateOf(false) }
+    val inProgress = vm.watchingSeries(series.id)
 
     fun episodeKey(e: Episode) = "ep:${series.id}:${e.id}"
     fun episodeLabel(e: Episode) = "S%02dE%02d".format(e.season, e.number)
@@ -89,6 +92,26 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
+            if (inProgress != null) {
+                // Série dans « En cours » : rappel de l'épisode et bouton pour l'en retirer (#18).
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "En cours : " + listOfNotNull(
+                            inProgress.meta.subtitle?.substringBefore(" · "),
+                            "arrêté à ${formatTime(inProgress.position)}",
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { confirmRemoveWatching = true }) { Text("Retirer de « En cours »") }
+                }
+            }
             val eps = episodes
             when {
                 err != null -> CenterMessage(err ?: "")
@@ -201,6 +224,19 @@ fun SeriesScreen(vm: AppViewModel, series: Media, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (confirmRemoveWatching) {
+        ConfirmRemoveWatching(
+            series.name,
+            isSeries = true,
+            onConfirm = {
+                confirmRemoveWatching = false
+                vm.removeWatchingSeries(series.id)
+                Toast.makeText(ctx, "« ${series.name} » retiré de « En cours »", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { confirmRemoveWatching = false },
+        )
     }
 
     confirmSeason?.let { sn ->

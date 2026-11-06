@@ -59,6 +59,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         reloadWatching()
     }
 
+    /** Entrée « En cours » d'une série (dernier épisode regardé), ou null. */
+    fun watchingSeries(seriesId: String): WatchEntry? = watching.firstOrNull { it.meta.seriesId == seriesId }
+
+    fun removeWatchingSeries(seriesId: String) {
+        WatchProgress.removeSeries(ctx, seriesId)
+        reloadWatching()
+    }
+
     /**
      * Lance un film ou un épisode en gardant sa progression pour « En cours ».
      * Si le titre a été téléchargé, c'est le fichier du téléphone qui est lu (marche hors ligne).

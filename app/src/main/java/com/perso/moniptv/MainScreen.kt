@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -324,6 +325,7 @@ fun BrowseScreen(
     var cat by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedMovie by remember { mutableStateOf<Media?>(null) }
     var watchMenu by remember { mutableStateOf<WatchEntry?>(null) }
+    var watchToRemove by remember { mutableStateOf<WatchEntry?>(null) }
     val listState = rememberLazyListState()
 
     // « En cours » : films ou épisodes commencés, pour cet onglet.
@@ -559,6 +561,7 @@ fun BrowseScreen(
                             e,
                             onClick = { vm.play(ctx, e.meta) },
                             onLongClick = { watchMenu = e },
+                            onRemove = { watchToRemove = e },
                         )
                     }
                 }
@@ -601,10 +604,41 @@ fun BrowseScreen(
             e,
             onResume = { watchMenu = null; vm.play(ctx, e.meta) },
             onOpenSeries = series?.let { s -> { watchMenu = null; onOpenSeries(s) } },
-            onRemove = { watchMenu = null; vm.removeWatching(e.meta.key) },
+            onRemove = { watchMenu = null; watchToRemove = e },
             onDismiss = { watchMenu = null },
         )
     }
+
+    watchToRemove?.let { e ->
+        ConfirmRemoveWatching(
+            e.meta.title,
+            isSeries = e.meta.seriesId != null,
+            onConfirm = {
+                watchToRemove = null
+                vm.removeWatching(e.meta.key)
+                Toast.makeText(ctx, "« ${e.meta.title} » retiré de « En cours »", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { watchToRemove = null },
+        )
+    }
+}
+
+/** Confirmation avant de retirer un film ou une série de « En cours ». */
+@Composable
+fun ConfirmRemoveWatching(title: String, isSeries: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Retirer de « En cours » ?") },
+        text = {
+            Text(
+                if (isSeries) "La série « $title » ne sera plus affichée dans « En cours ». " +
+                    "Elle y reviendra si vous regardez un de ses épisodes."
+                else "« $title » ne sera plus affiché dans « En cours ». Le film repartira du début."
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Retirer") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
 }
 
 /** Menu d'un titre « En cours » (appui long) : reprendre, voir la série, retirer. */
@@ -638,7 +672,7 @@ fun WatchMenuDialog(
 /** Case « En cours » : l'affiche avec une barre de progression, le titre et le temps restant. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun WatchCard(e: WatchEntry, onClick: () -> Unit, onLongClick: () -> Unit) {
+fun WatchCard(e: WatchEntry, onClick: () -> Unit, onLongClick: () -> Unit, onRemove: (() -> Unit)? = null) {
     Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Box {
             Poster(e.meta.icon, e.meta.title, Modifier.fillMaxWidth())
@@ -647,6 +681,25 @@ fun WatchCard(e: WatchEntry, onClick: () -> Unit, onLongClick: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(4.dp),
                 trackColor = Color.Black.copy(alpha = 0.55f),
             )
+            if (onRemove != null) {
+                // Bouton « retirer » en haut à droite (zone tactile de 40 dp, pastille de 26 dp), comme le cœur des affiches.
+                Box(
+                    Modifier.align(Alignment.TopEnd).size(40.dp).clickable(onClick = onRemove),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            "Retirer de « En cours »",
+                            tint = Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
         }
         Spacer(Modifier.height(6.dp))
         Text(

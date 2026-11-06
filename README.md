@@ -51,6 +51,9 @@ la configuration (la clé de signature `app/moniptv.jks` est fixe — gardez-la)
 - **Favoris** : touchez le petit cœur en haut à droite d'une affiche (sans ouvrir la fiche), le cœur de la
   fiche d'un film ou en haut de l'écran d'une série, ou faites un appui long sur une affiche. Les favoris sont regroupés dans la catégorie **Favoris** des onglets Films et
   Séries (et en tête de « Toutes »). Ils sont conservés même après « Changer de compte ».
+- **En cours** : pour retirer un film ou une série, touchez la petite croix en haut à droite de sa case
+  (ou appui long → « Retirer de « En cours » »). Une série peut aussi être retirée depuis son écran
+  (ligne « En cours » sous la barre du haut). Elle revient si vous regardez à nouveau un de ses épisodes.
 - **Synopsis** : la fiche d'un film et l'écran d'une série affichent le résumé, l'année, le genre, la durée
   et la note (comptes Xtream Codes ; les playlists M3U ne fournissent pas de résumé).
 - **Tri** : films et séries sont rangés du dernier ajouté au premier, dans chaque catégorie et dans la recherche.
