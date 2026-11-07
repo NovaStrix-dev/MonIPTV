@@ -76,6 +76,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -174,6 +175,9 @@ fun MainScreen(vm: AppViewModel) {
     var openSeries by remember { mutableStateOf<Media?>(null) }
     var confirmLogout by remember { mutableStateOf(false) }
     var showDiagnostic by remember { mutableStateOf(false) }
+    // Garde l'état de chaque onglet (catégorie choisie, position dans la grille, recherche)
+    // pendant qu'une série est ouverte ou qu'on passe sur un autre onglet (#26).
+    val tabStates = rememberSaveableStateHolder()
 
     // Résultat d'une actualisation : message bref.
     LaunchedEffect(vm.info) {
@@ -263,32 +267,34 @@ fun MainScreen(vm: AppViewModel) {
                 VpnBypassButton(vm)
             }
             VpnBypassNotice(vm)
-            when {
-                tab == Tab.DOWNLOADS -> DownloadsScreen(vm)
-                c == null -> Column(
-                    Modifier.fillMaxSize().padding(32.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    if (vm.loading) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(16.dp))
-                        Text("Chargement du catalogue…")
-                    } else {
-                        Text(
-                            (vm.error ?: "Catalogue indisponible.") +
-                                "\n\nVos téléchargements restent accessibles dans « Hors ligne ».",
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        TextButton(onClick = { vm.refresh() }) { Text("Réessayer") }
-                        if (vm.error != null) VpnBypassButton(vm)
+            tabStates.SaveableStateProvider(tab.name) {
+                when {
+                    tab == Tab.DOWNLOADS -> DownloadsScreen(vm)
+                    c == null -> Column(
+                        Modifier.fillMaxSize().padding(32.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (vm.loading) {
+                            CircularProgressIndicator()
+                            Spacer(Modifier.height(16.dp))
+                            Text("Chargement du catalogue…")
+                        } else {
+                            Text(
+                                (vm.error ?: "Catalogue indisponible.") +
+                                    "\n\nVos téléchargements restent accessibles dans « Hors ligne ».",
+                                textAlign = TextAlign.Center,
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            TextButton(onClick = { vm.refresh() }) { Text("Réessayer") }
+                            if (vm.error != null) VpnBypassButton(vm)
+                        }
                     }
+                    tab == Tab.LIVE -> BrowseScreen(vm, c.liveCats, c.live, ContentType.LIVE, c.updatedAt) {}
+                    tab == Tab.MOVIES -> BrowseScreen(vm, c.movieCats, c.movies, ContentType.MOVIE, c.updatedAt) {}
+                    tab == Tab.SERIES -> BrowseScreen(vm, c.seriesCats, c.series, ContentType.SERIES, c.updatedAt) { openSeries = it }
+                    tab == Tab.SEARCH -> SearchScreen(vm, c) { openSeries = it }
                 }
-                tab == Tab.LIVE -> BrowseScreen(vm, c.liveCats, c.live, ContentType.LIVE, c.updatedAt) {}
-                tab == Tab.MOVIES -> BrowseScreen(vm, c.movieCats, c.movies, ContentType.MOVIE, c.updatedAt) {}
-                tab == Tab.SERIES -> BrowseScreen(vm, c.seriesCats, c.series, ContentType.SERIES, c.updatedAt) { openSeries = it }
-                tab == Tab.SEARCH -> SearchScreen(vm, c) { openSeries = it }
             }
         }
     }
@@ -376,19 +382,20 @@ fun BrowseScreen(
         }
     }
 
-    val sections by produceState<List<Section>?>(initialValue = null, sorted, cat, recent, favs) {
+    fun buildSections(items: List<Media>): List<Section> = when {
+        cat == WATCH_CAT -> emptyList()
+        cat == NEW_CAT -> listOf(Section("", recent, showDates = true))
+        cat == FAV_CAT -> listOf(Section("", favs))
+        cat != null -> listOf(Section("", items.filter { it.categoryId == cat }))
+        type == ContentType.LIVE -> listOf(Section("", items))
+        // « Toutes » (#23) : une seule grille avec tous les titres, sans blocs ni titres de section.
+        else -> listOf(Section("", items))
+    }
+    // Première valeur calculée tout de suite : au retour d'une série (#26), la grille est déjà remplie
+    // et retrouve sa position au lieu de repartir en haut.
+    val sections by produceState<List<Section>?>(initialValue = remember { buildSections(sorted) }, sorted, cat, recent, favs) {
         val items = sorted
-        value = withContext(Dispatchers.Default) {
-            when {
-                cat == WATCH_CAT -> emptyList()
-                cat == NEW_CAT -> listOf(Section("", recent, showDates = true))
-                cat == FAV_CAT -> listOf(Section("", favs))
-                cat != null -> listOf(Section("", items.filter { it.categoryId == cat }))
-                type == ContentType.LIVE -> listOf(Section("", items))
-                // « Toutes » (#23) : une seule grille avec tous les titres, sans blocs ni titres de section.
-                else -> listOf(Section("", items))
-            }
-        }
+        value = withContext(Dispatchers.Default) { buildSections(items) }
     }
 
     val gridState = rememberLazyGridState()
@@ -407,8 +414,12 @@ fun BrowseScreen(
     val canCollapse = cat == null && type != ContentType.LIVE && allSectionIds.isNotEmpty()
     val allCollapsed = canCollapse && allSectionIds.all { it in collapsed }
 
-    // Remonte en haut de la liste quand on change de catégorie.
+    // Remonte en haut de la liste quand on change de catégorie, mais pas au retour d'une série
+    // ou d'un autre onglet, où la catégorie et la position sont retrouvées (#26).
+    var shownCat by rememberSaveable { mutableStateOf(cat ?: "") }
     LaunchedEffect(cat) {
+        if ((cat ?: "") == shownCat) return@LaunchedEffect
+        shownCat = cat ?: ""
         runCatching { listState.scrollToItem(0) }
         runCatching { gridState.scrollToItem(0) }
     }
