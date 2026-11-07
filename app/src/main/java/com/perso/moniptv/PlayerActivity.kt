@@ -7,6 +7,9 @@ import android.graphics.Color
 import android.os.Bundle
 import android.widget.Toast
 import android.view.View
+import android.view.WindowManager
+import android.os.SystemClock
+import androidx.media3.session.MediaSession
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -61,6 +64,10 @@ import org.json.JSONObject
 class PlayerActivity : ComponentActivity() {
 
     private var player: ExoPlayer? = null
+    /** Session média (#25) : indique à Android TV qu'une vidéo est en cours (pas d'économiseur d'écran ni de veille). */
+    private var mediaSession: MediaSession? = null
+    /** Début de la lecture en cours (pour le journal de diagnostic). */
+    private var playStartedAt = 0L
     private lateinit var playerView: PlayerView
     private var url: String = ""
     private var live = false
@@ -100,6 +107,8 @@ class PlayerActivity : ComponentActivity() {
             if (channelIndex < 0) channels = emptyList()
         }
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Écran maintenu allumé sur toute la fenêtre du lecteur, pas seulement la vue vidéo (#25).
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         playerView = PlayerView(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -240,6 +249,7 @@ class PlayerActivity : ComponentActivity() {
         channelIndex = i
         channelName = c.name
         url = c.url
+        Diagnostics.log(this, "zapping vers « ${c.name} »")
         player?.let { p ->
             p.setMediaItem(mediaItemFor(url))
             p.playWhenReady = true
@@ -255,8 +265,13 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        val why = if (isFinishing) "lecteur fermé (Retour)" else "lecteur passé en arrière-plan (veille, économiseur d'écran ou accueil du boîtier)"
+        Diagnostics.log(this, "$why après ${minutesPlayed()} min")
         releasePlayer()
     }
+
+    private fun minutesPlayed(): Long =
+        if (playStartedAt == 0L) 0 else (SystemClock.elapsedRealtime() - playStartedAt) / 60_000
 
     private fun initPlayer() {
         if (player != null) return
@@ -284,7 +299,12 @@ class PlayerActivity : ComponentActivity() {
         }
 
         p.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED) Diagnostics.log(this@PlayerActivity, "fin de la vidéo après ${minutesPlayed()} min")
+            }
+
             override fun onPlayerError(error: PlaybackException) {
+                Diagnostics.log(this@PlayerActivity, "erreur lecteur après ${minutesPlayed()} min : ${error.errorCodeName} · ${SystemNetwork.describe(error)}")
                 if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
                     p.seekToDefaultPosition()
                     p.prepare()
@@ -314,6 +334,12 @@ class PlayerActivity : ComponentActivity() {
         p.prepare()
         playerView.player = p
         player = p
+        mediaSession = runCatching { MediaSession.Builder(this, p).build() }
+            .onFailure { Diagnostics.log(this, "session média impossible : ${it.javaClass.simpleName}") }
+            .getOrNull()
+        playStartedAt = SystemClock.elapsedRealtime()
+        val what = if (live) "chaîne « $channelName »" else "« ${meta?.title ?: playTitle} »${meta?.subtitle?.let { " $it" } ?: ""}"
+        Diagnostics.log(this, "lecture de $what${if (url.startsWith("file:")) " (fichier téléchargé)" else ""}")
     }
 
     private fun mediaItemFor(u: String): MediaItem {
@@ -359,6 +385,8 @@ class PlayerActivity : ComponentActivity() {
                 e.apply()
             }
         }
+        mediaSession?.release()
+        mediaSession = null
         p.release()
         player = null
         playerView.player = null

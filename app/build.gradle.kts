@@ -14,8 +14,8 @@ android {
         applicationId = "com.perso.moniptv"
         minSdk = 26
         targetSdk = 34
-        versionCode = 17
-        versionName = "1.16"
+        versionCode = 18
+        versionName = "1.17"
     }
 
     // Clé de signature fixe : les mises à jour de l'APK s'installent par-dessus
@@ -83,6 +83,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
+    // Session média (#25) : Android TV sait qu'une vidéo est en cours (pas d'économiseur d'écran).
+    implementation("androidx.media3:media3-session:1.3.1")
     // Le lecteur passe par OkHttp (même résolution d'adresses adaptée aux VPN que le reste de l'appli).
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
     // Décodeur audio logiciel FFmpeg (AC3, E-AC3, DTS, TrueHD…) : évite les vidéos sans son.

@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.NewReleases
@@ -172,6 +173,7 @@ fun MainScreen(vm: AppViewModel) {
     var tab by rememberSaveable { mutableStateOf(Tab.MOVIES) }
     var openSeries by remember { mutableStateOf<Media?>(null) }
     var confirmLogout by remember { mutableStateOf(false) }
+    var showDiagnostic by remember { mutableStateOf(false) }
 
     // Résultat d'une actualisation : message bref.
     LaunchedEffect(vm.info) {
@@ -186,6 +188,15 @@ fun MainScreen(vm: AppViewModel) {
         BackHandler { openSeries = null }
         SeriesScreen(vm, series, onBack = { openSeries = null })
         return
+    }
+
+    if (showDiagnostic) {
+        DiagnosticDialog(
+            title = "Journal de diagnostic",
+            intro = "Derniers événements du lecteur. En cas d'arrêt de l'appli, copiez ce texte et envoyez-le à Claude.",
+            report = Diagnostics.fullReport(ctx),
+            onDismiss = { showDiagnostic = false },
+        )
     }
 
     Scaffold(
@@ -213,6 +224,10 @@ fun MainScreen(vm: AppViewModel) {
                             }
                             Spacer(Modifier.width(6.dp))
                             Text(if (vm.loading) "Mise à jour…" else "Actualiser")
+                        }
+                        // Journal de diagnostic (#25) : à copier et envoyer en cas d'arrêt de l'appli.
+                        IconButton(onClick = { showDiagnostic = true }) {
+                            Icon(Icons.Outlined.BugReport, "Journal de diagnostic")
                         }
                         IconButton(onClick = { confirmLogout = true }) {
                             Icon(Icons.AutoMirrored.Filled.Logout, "Changer de compte")

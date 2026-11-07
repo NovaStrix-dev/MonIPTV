@@ -17,6 +17,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             AppTheme {
                 if (vm.account == null) LoginScreen(vm) else MainScreen(vm)
+                // Rapport affiché au démarrage si l'appli s'est arrêtée anormalement (#25).
+                CrashReportHost()
             }
         }
     }

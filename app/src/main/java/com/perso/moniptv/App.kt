@@ -14,7 +14,19 @@ import coil.memory.MemoryCache
 class App : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
+        Diagnostics.init(this)
         SystemNetwork.init(this)
+    }
+
+    /** Manque de mémoire signalé par Android : noté dans le journal de diagnostic (#25). */
+    override fun onLowMemory() {
+        super.onLowMemory()
+        Diagnostics.log(this, "Android signale un manque de mémoire")
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level == TRIM_MEMORY_RUNNING_CRITICAL) Diagnostics.log(this, "mémoire presque épuisée (appli à l'écran)")
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
