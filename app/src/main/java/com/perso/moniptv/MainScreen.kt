@@ -79,6 +79,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -358,6 +359,10 @@ fun BrowseScreen(
     var watchToRemove by remember { mutableStateOf<WatchEntry?>(null) }
     // #28 : après « Fermer » ou « Annuler », la sélection (télécommande) revient sur la case du titre.
     var refocusWatch by remember { mutableStateOf<String?>(null) }
+    /** Film ou série du catalogue correspondant à une case « En cours ». */
+    fun mediaForWatch(e: WatchEntry): Media? =
+        if (e.meta.seriesId != null) items.firstOrNull { it.id == e.meta.seriesId }
+        else items.firstOrNull { "movie:" + it.stableKey == e.meta.key }
     val listState = rememberLazyListState()
 
     // « En cours » : films ou épisodes commencés, pour cet onglet.
@@ -524,8 +529,20 @@ fun BrowseScreen(
                         if (!folded) gridItems(shownWatching, key = { "w:" + it.meta.key }) { e ->
                             WatchCard(
                                 e,
-                                onClick = { vm.play(ctx, e.meta) },
-                                onLongClick = { watchMenu = e },
+                                // #28 : toucher ouvre toujours la fiche (synopsis, favori, télécharger, lire, retirer de « En cours »).
+                                onClick = {
+                                    val m = mediaForWatch(e)
+                                    when {
+                                        m == null -> watchMenu = e // titre absent du catalogue : ancien menu
+                                        e.meta.seriesId != null -> onOpenSeries(m)
+                                        else -> selectedMovie = m
+                                    }
+                                },
+                                // Appui long : ajoute ou retire des favoris, comme sur les autres affiches.
+                                onLongClick = {
+                                    val m = mediaForWatch(e)
+                                    if (m != null) toggleFavoriteWithToast(ctx, vm, m) else watchMenu = e
+                                },
                                 onRemove = { watchToRemove = e },
                                 requestFocus = refocusWatch == e.meta.key,
                                 onFocusRequested = { refocusWatch = null },
@@ -659,38 +676,9 @@ fun WatchCard(
             onFocusRequested()
         }
     }
-    // #28 : à la télécommande, l'appui long (touche OK maintenue) n'était pas reconnu par combinedClickable :
-    // on gère nous-mêmes OK = lire, OK maintenu = menu (Reprendre / Voir la série / Retirer).
-    var keyPressed by remember { mutableStateOf(false) }
-    var keyLongDone by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth()
-            .onPreviewKeyEvent { ev ->
-                val k = ev.nativeKeyEvent
-                if (k.keyCode != android.view.KeyEvent.KEYCODE_DPAD_CENTER &&
-                    k.keyCode != android.view.KeyEvent.KEYCODE_ENTER &&
-                    k.keyCode != android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
-                ) return@onPreviewKeyEvent false
-                when (k.action) {
-                    android.view.KeyEvent.ACTION_DOWN -> {
-                        if (k.repeatCount == 0) {
-                            keyPressed = true
-                            keyLongDone = false
-                        } else if (keyPressed && k.eventTime - k.downTime >= LONG_PRESS_MS) {
-                            keyLongDone = true
-                        }
-                        true
-                    }
-                    android.view.KeyEvent.ACTION_UP -> {
-                        // Menu ouvert au relâchement : sinon la touche encore enfoncée validerait « Reprendre » dans le menu.
-                        if (keyPressed) { if (keyLongDone) onLongClick() else onClick() }
-                        keyPressed = false
-                        keyLongDone = false
-                        true
-                    }
-                    else -> false
-                }
-            }
+            .remoteOkKeys(onClick, onLongClick)
             .focusRequester(focus)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
@@ -747,8 +735,49 @@ fun WatchCard(
     }
 }
 
-/** Durée d'appui sur OK (télécommande) pour ouvrir le menu d'une case « En cours ». */
+/** Durée d'appui sur OK (télécommande) pour un appui long. */
 private const val LONG_PRESS_MS = 500L
+
+/**
+ * #28 : touche OK de la télécommande sur une affiche. combinedClickable ne reconnaît pas l'appui long à la
+ * télécommande (la sélection partait sur le cœur ou la croix) : appui court = [onClick], OK maintenu 0,5 s =
+ * [onLongClick], déclenché au relâchement (la touche encore enfoncée ne valide donc rien dans une fenêtre qui s'ouvre).
+ */
+@Composable
+fun Modifier.remoteOkKeys(onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier {
+    var pressed by remember { mutableStateOf(false) }
+    var long by remember { mutableStateOf(false) }
+    val click by rememberUpdatedState(onClick)
+    val longClick by rememberUpdatedState(onLongClick)
+    return onPreviewKeyEvent { ev ->
+        val k = ev.nativeKeyEvent
+        if (k.keyCode != android.view.KeyEvent.KEYCODE_DPAD_CENTER &&
+            k.keyCode != android.view.KeyEvent.KEYCODE_ENTER &&
+            k.keyCode != android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+        ) return@onPreviewKeyEvent false
+        when (k.action) {
+            android.view.KeyEvent.ACTION_DOWN -> {
+                if (k.repeatCount == 0) {
+                    pressed = true
+                    long = false
+                } else if (pressed && k.eventTime - k.downTime >= LONG_PRESS_MS) {
+                    long = true
+                }
+                true
+            }
+            android.view.KeyEvent.ACTION_UP -> {
+                if (pressed) {
+                    val l = longClick
+                    if (long && l != null) l() else if (!long) click()
+                }
+                pressed = false
+                long = false
+                true
+            }
+            else -> false
+        }
+    }
+}
 
 /** 1:02:03 ou 12:34. */
 fun formatTime(ms: Long): String {
@@ -766,6 +795,7 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
     val key = "movie:${m.stableKey}"
     val already = remember(m) { vm.downloads.isDownloaded(key) }
     val inProgress = remember(m, vm.watching) { vm.watching.firstOrNull { it.meta.key == key } }
+    var confirmRemove by remember(m) { mutableStateOf(false) }
     var details by remember(m) { mutableStateOf<MediaDetails?>(null) }
     var loadingDetails by remember(m) { mutableStateOf(vm.account?.type == AccountType.XTREAM) }
     LaunchedEffect(m) {
@@ -818,6 +848,10 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                             )
+                            // #28 : retirer le film de « En cours » depuis sa fiche.
+                            TextButton(onClick = { confirmRemove = true }, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                                Text("Retirer de « En cours »")
+                            }
                         }
                     }
                 }
@@ -855,6 +889,18 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
             }
         },
     )
+    if (confirmRemove) {
+        ConfirmRemoveWatching(
+            m.name,
+            isSeries = false,
+            onConfirm = {
+                confirmRemove = false
+                vm.removeWatching(key)
+                Toast.makeText(ctx, "« ${m.name} » retiré de « En cours »", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { confirmRemove = false },
+        )
+    }
 }
 
 @Composable
@@ -953,14 +999,21 @@ fun PosterCard(
     watched: Boolean = false,
     onClick: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onToggleFavorite)) {
+    Column(
+        Modifier.fillMaxWidth()
+            .remoteOkKeys(onClick, onToggleFavorite)
+            .combinedClickable(onClick = onClick, onLongClick = onToggleFavorite)
+    ) {
         Box {
             Poster(m.icon, m.name, Modifier.fillMaxWidth())
             if (watched) WatchedBadge(Modifier.align(Alignment.TopStart).padding(6.dp))
             if (onToggleFavorite != null || favorite) {
                 // Zone tactile de 40 dp, pastille visible de 26 dp.
                 Box(
+                    // Non sélectionnable à la télécommande (#28) : la sélection reste sur l'affiche,
+                    // le favori se change avec OK maintenu. Toujours utilisable au doigt.
                     Modifier.align(Alignment.TopEnd).size(40.dp)
+                        .focusProperties { canFocus = false }
                         .then(if (onToggleFavorite != null) Modifier.clickable(onClick = onToggleFavorite) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
