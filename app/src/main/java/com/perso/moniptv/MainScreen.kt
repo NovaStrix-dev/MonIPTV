@@ -83,6 +83,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -658,7 +659,41 @@ fun WatchCard(
             onFocusRequested()
         }
     }
-    Column(Modifier.fillMaxWidth().focusRequester(focus).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    // #28 : à la télécommande, l'appui long (touche OK maintenue) n'était pas reconnu par combinedClickable :
+    // on gère nous-mêmes OK = lire, OK maintenu = menu (Reprendre / Voir la série / Retirer).
+    var keyPressed by remember { mutableStateOf(false) }
+    var keyLongDone by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth()
+            .onPreviewKeyEvent { ev ->
+                val k = ev.nativeKeyEvent
+                if (k.keyCode != android.view.KeyEvent.KEYCODE_DPAD_CENTER &&
+                    k.keyCode != android.view.KeyEvent.KEYCODE_ENTER &&
+                    k.keyCode != android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                ) return@onPreviewKeyEvent false
+                when (k.action) {
+                    android.view.KeyEvent.ACTION_DOWN -> {
+                        if (k.repeatCount == 0) {
+                            keyPressed = true
+                            keyLongDone = false
+                        } else if (keyPressed && k.eventTime - k.downTime >= LONG_PRESS_MS) {
+                            keyLongDone = true
+                        }
+                        true
+                    }
+                    android.view.KeyEvent.ACTION_UP -> {
+                        // Menu ouvert au relâchement : sinon la touche encore enfoncée validerait « Reprendre » dans le menu.
+                        if (keyPressed) { if (keyLongDone) onLongClick() else onClick() }
+                        keyPressed = false
+                        keyLongDone = false
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .focusRequester(focus)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    ) {
         Box {
             Poster(e.meta.icon, e.meta.title, Modifier.fillMaxWidth())
             LinearProgressIndicator(
@@ -711,6 +746,9 @@ fun WatchCard(
         )
     }
 }
+
+/** Durée d'appui sur OK (télécommande) pour ouvrir le menu d'une case « En cours ». */
+private const val LONG_PRESS_MS = 500L
 
 /** 1:02:03 ou 12:34. */
 fun formatTime(ms: Long): String {

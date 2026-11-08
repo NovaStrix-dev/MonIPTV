@@ -232,20 +232,64 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    // #27 (retour) : flèche gauche / droite maintenue = sauts de plus en plus grands selon le temps déjà parcouru.
+    private var holdKey = 0
+    private var holdTarget = 0L
+    private var holdSkipped = 0L
+    private var holdLastStep = 0L
+
+    /** Pas du saut selon le temps déjà parcouru pendant l'appui : 10 s, puis 1 min, 5 min, 10 min. */
+    private fun holdStep(skipped: Long): Long = when {
+        skipped < 2 * 60_000L -> 10_000L   // les 2 premières minutes
+        skipped < 7 * 60_000L -> 60_000L   // les 5 minutes suivantes
+        skipped < 37 * 60_000L -> 300_000L // les 30 minutes suivantes
+        else -> 600_000L                   // au-delà
+    }
+
+    private fun holdSeek(p: Player, forward: Boolean) {
+        val step = holdStep(holdSkipped)
+        val dur = p.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+        var t = holdTarget + if (forward) step else -step
+        t = if (dur != null) t.coerceIn(0L, (dur - 1_000L).coerceAtLeast(0L)) else t.coerceAtLeast(0L)
+        holdTarget = t
+        holdSkipped += step
+        holdLastStep = SystemClock.uptimeMillis()
+        p.seekTo(t)
+        playerView.showController()
+    }
+
     /**
-     * #27 : flèches gauche / droite de la télécommande, commandes masquées (film, épisode) : recule / avance de 10 s
-     * et affiche les commandes. Commandes visibles, les flèches servent à se déplacer (sur la barre : pas de 10 s).
+     * #27 : flèches gauche / droite de la télécommande (film, épisode), commandes masquées ou barre de progression
+     * sélectionnée. Un appui = 10 s ; touche maintenue = sauts évolutifs (voir [holdStep]), un saut toutes les
+     * [HOLD_STEP_INTERVAL_MS]. Commandes visibles et sélection sur un bouton : les flèches servent à se déplacer.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val p = player
-        if (!live && p != null && !controlsVisible &&
-            (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
-        ) {
-            if (event.action == KeyEvent.ACTION_DOWN) {
-                if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) p.seekBack() else p.seekForward()
-                playerView.showController()
+        val key = event.keyCode
+        if (live || p == null || (key != KeyEvent.KEYCODE_DPAD_LEFT && key != KeyEvent.KEYCODE_DPAD_RIGHT)) {
+            return super.dispatchKeyEvent(event)
+        }
+        val forward = key == KeyEvent.KEYCODE_DPAD_RIGHT
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    val onBar = playerView.findFocus()?.id == androidx.media3.ui.R.id.exo_progress
+                    if (controlsVisible && !onBar) { holdKey = 0; return super.dispatchKeyEvent(event) }
+                    holdKey = key
+                    holdTarget = p.currentPosition
+                    holdSkipped = 0L
+                    holdSeek(p, forward)
+                    return true
+                }
+                if (holdKey != key) return super.dispatchKeyEvent(event)
+                if (SystemClock.uptimeMillis() - holdLastStep >= HOLD_STEP_INTERVAL_MS) holdSeek(p, forward)
+                return true
             }
-            return true
+            KeyEvent.ACTION_UP -> {
+                if (holdKey != key) return super.dispatchKeyEvent(event)
+                holdKey = 0
+                return true
+            }
         }
         return super.dispatchKeyEvent(event)
     }
@@ -418,6 +462,7 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         private const val SEEK_STEP_MS = 10_000L
+        private const val HOLD_STEP_INTERVAL_MS = 200L
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_LIVE = "live"
