@@ -57,6 +57,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import org.json.JSONObject
 
@@ -118,6 +119,8 @@ class PlayerActivity : ComponentActivity() {
             // Bouton « Sous-titres » dans la barre du lecteur (masqué par défaut dans Media3).
             // Il liste les sous-titres du fichier ou du flux et permet de les désactiver.
             setShowSubtitleButton(true)
+            // #27 : la barre de progression avançait d'1/20 de la durée par flèche (≈ 4 min) : 10 s à la place.
+            findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.setKeyTimeIncrement(SEEK_STEP_MS)
             setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v ->
                 controlsVisible = v == View.VISIBLE
             })
@@ -229,6 +232,24 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * #27 : flèches gauche / droite de la télécommande, commandes masquées (film, épisode) : recule / avance de 10 s
+     * et affiche les commandes. Commandes visibles, les flèches servent à se déplacer (sur la barre : pas de 10 s).
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val p = player
+        if (!live && p != null && !controlsVisible &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) p.seekBack() else p.seekForward()
+                playerView.showController()
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     /** Touches télécommande / clavier : chaîne + / chaîne - (et haut / bas quand les commandes sont masquées). */
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (live && channels.size > 1) {
@@ -287,6 +308,9 @@ class PlayerActivity : ComponentActivity() {
 
         val p = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
+            // #27 : boutons avance / retour, touches avance rapide / retour rapide : 10 s.
+            .setSeekBackIncrementMs(SEEK_STEP_MS)
+            .setSeekForwardIncrementMs(SEEK_STEP_MS)
             .build()
 
         // Sous-titres : on réactive automatiquement la dernière langue choisie.
@@ -393,6 +417,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val SEEK_STEP_MS = 10_000L
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_LIVE = "live"

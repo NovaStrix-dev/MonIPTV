@@ -80,6 +80,9 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -104,6 +107,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -351,6 +355,8 @@ fun BrowseScreen(
     var selectedMovie by remember { mutableStateOf<Media?>(null) }
     var watchMenu by remember { mutableStateOf<WatchEntry?>(null) }
     var watchToRemove by remember { mutableStateOf<WatchEntry?>(null) }
+    // #28 : après « Fermer » ou « Annuler », la sélection (télécommande) revient sur la case du titre.
+    var refocusWatch by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
     // « En cours » : films ou épisodes commencés, pour cet onglet.
@@ -520,6 +526,8 @@ fun BrowseScreen(
                                 onClick = { vm.play(ctx, e.meta) },
                                 onLongClick = { watchMenu = e },
                                 onRemove = { watchToRemove = e },
+                                requestFocus = refocusWatch == e.meta.key,
+                                onFocusRequested = { refocusWatch = null },
                             )
                         }
                     }
@@ -565,7 +573,7 @@ fun BrowseScreen(
             onResume = { watchMenu = null; vm.play(ctx, e.meta) },
             onOpenSeries = series?.let { s -> { watchMenu = null; onOpenSeries(s) } },
             onRemove = { watchMenu = null; watchToRemove = e },
-            onDismiss = { watchMenu = null },
+            onDismiss = { watchMenu = null; refocusWatch = e.meta.key },
         )
     }
 
@@ -578,7 +586,7 @@ fun BrowseScreen(
                 vm.removeWatching(e.meta.key)
                 Toast.makeText(ctx, "« ${e.meta.title} » retiré de « En cours »", Toast.LENGTH_SHORT).show()
             },
-            onDismiss = { watchToRemove = null },
+            onDismiss = { watchToRemove = null; refocusWatch = e.meta.key },
         )
     }
 }
@@ -632,8 +640,25 @@ fun WatchMenuDialog(
 /** Case « En cours » : l'affiche avec une barre de progression, le titre et le temps restant. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun WatchCard(e: WatchEntry, onClick: () -> Unit, onLongClick: () -> Unit, onRemove: (() -> Unit)? = null) {
-    Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+fun WatchCard(
+    e: WatchEntry,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onRemove: (() -> Unit)? = null,
+    requestFocus: Boolean = false,
+    onFocusRequested: () -> Unit = {},
+) {
+    val focus = remember { FocusRequester() }
+    // #28 : redonne la sélection à la case quand le menu ou la confirmation se ferme sans retrait
+    // (petit délai : la fenêtre du dialogue doit avoir disparu pour que le focus revienne à l'écran).
+    LaunchedEffect(requestFocus) {
+        if (requestFocus) {
+            delay(150)
+            runCatching { focus.requestFocus() }
+            onFocusRequested()
+        }
+    }
+    Column(Modifier.fillMaxWidth().focusRequester(focus).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Box {
             Poster(e.meta.icon, e.meta.title, Modifier.fillMaxWidth())
             LinearProgressIndicator(
@@ -644,7 +669,11 @@ fun WatchCard(e: WatchEntry, onClick: () -> Unit, onLongClick: () -> Unit, onRem
             if (onRemove != null) {
                 // Bouton « retirer » en haut à droite (zone tactile de 40 dp, pastille de 26 dp), comme le cœur des affiches.
                 Box(
-                    Modifier.align(Alignment.TopEnd).size(40.dp).clickable(onClick = onRemove),
+                    // Non sélectionnable à la télécommande (#28) : la sélection reste sur l'affiche ;
+                    // sur télé, on retire avec l'appui long. Toujours utilisable au doigt.
+                    Modifier.align(Alignment.TopEnd).size(40.dp)
+                        .focusProperties { canFocus = false }
+                        .clickable(onClick = onRemove),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
