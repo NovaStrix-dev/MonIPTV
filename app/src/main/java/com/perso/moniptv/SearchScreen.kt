@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -43,7 +44,8 @@ import kotlinx.coroutines.withContext
 
 private enum class Scope(val label: String) { ALL("Films et séries"), MOVIES("Films"), SERIES("Séries") }
 
-private data class Results(val movies: List<Media>, val series: List<Media>)
+/** Résultats d'une recherche, avec les mots qui les ont produits (pour savoir s'ils sont à jour). */
+private data class Results(val words: List<String>, val movies: List<Media>, val series: List<Media>)
 
 /**
  * Recherche par mot dans les titres de tous les films et toutes les séries.
@@ -60,15 +62,32 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
 
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 
-    val results by produceState(initialValue = Results(emptyList(), emptyList()), query, catalog) {
+    // null tant que la première recherche n'est pas calculée (ex. au retour d'une série) :
+    // évite d'afficher « Aucun film ni série » pendant le calcul.
+    val results by produceState<Results?>(initialValue = null, query, catalog) {
         delay(250) // attend la fin de la frappe
         value = withContext(Dispatchers.Default) {
             val words = queryWords(query)
-            if (words.isEmpty()) Results(emptyList(), emptyList())
+            if (words.isEmpty()) Results(words, emptyList(), emptyList())
             else Results(
+                words,
                 catalog.movies.filter { it.matches(words) }.newestFirst(),
                 catalog.series.filter { it.matches(words) }.newestFirst(),
             )
+        }
+    }
+
+    // Position de la grille, gardée au retour d'une série (#26) mais remise en haut à chaque
+    // nouvelle recherche ou nouveau filtre. Sans cela, la grille restait à l'ancienne position :
+    // les films étant en premier, on tombait sur la fin de la liste, c'est-à-dire sur les séries.
+    val gridState = rememberLazyGridState()
+    var shownSearch by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(results, scope) {
+        val r = results ?: return@LaunchedEffect
+        val key = r.words.joinToString(" ") + "|" + scope.name
+        if (key != shownSearch) {
+            shownSearch = key
+            runCatching { gridState.scrollToItem(0) }
         }
     }
 
@@ -92,24 +111,29 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
             }
         }
 
-        val total = (if (showMovies) results.movies.size else 0) + (if (showSeries) results.series.size else 0)
+        val r = results
+        val words = queryWords(query)
+        val total = if (r == null) 0 else (if (showMovies) r.movies.size else 0) + (if (showSeries) r.series.size else 0)
         when {
-            queryWords(query).isEmpty() -> CenterMessage("Tapez un mot contenu dans le titre d'un film ou d'une série.")
-            total == 0 -> CenterMessage("Aucun film ni série ne contient « ${query.trim()} » dans son titre.")
+            words.isEmpty() -> CenterMessage("Tapez un mot contenu dans le titre d'un film ou d'une série.")
+            r == null -> CenterMessage("Recherche…", loading = true)
+            total == 0 && r.words == words -> CenterMessage("Aucun film ni série ne contient « ${query.trim()} » dans son titre.")
+            total == 0 -> CenterMessage("Recherche…", loading = true)
             else -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(POSTER_MIN_WIDTH),
+                state = gridState,
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                if (showMovies && results.movies.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Films (${results.movies.size})") }
-                    items(results.movies) { m -> PosterCard(m, movieCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }, watched = vm.isWatched(m)) { selectedMovie = m } }
+                if (showMovies && r.movies.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Films (${r.movies.size})") }
+                    items(r.movies) { m -> PosterCard(m, movieCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }, watched = vm.isWatched(m)) { selectedMovie = m } }
                 }
-                if (showSeries && results.series.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Séries (${results.series.size})") }
-                    items(results.series) { m -> PosterCard(m, seriesCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }, watched = vm.isWatched(m)) { onOpenSeries(m) } }
+                if (showSeries && r.series.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Séries (${r.series.size})") }
+                    items(r.series) { m -> PosterCard(m, seriesCats[m.categoryId], vm.isFavorite(m), onToggleFavorite = { toggleFavoriteWithToast(ctx, vm, m) }, watched = vm.isWatched(m)) { onOpenSeries(m) } }
                 }
             }
         }
