@@ -102,6 +102,17 @@ class XtreamApi(private val acc: Account) {
         )
     }
 
+    /**
+     * Programme TV d'une chaîne (#31) : programme en cours et suivants, objets bruts de « epg_listings ».
+     * Titres et descriptions sont souvent encodés en base64 (décodés par [Epg]).
+     */
+    fun shortEpg(streamId: String, limit: Int): List<JSONObject> {
+        val raw = api("get_short_epg", "&stream_id=$streamId&limit=$limit").trim()
+        if (!raw.startsWith("{")) return emptyList()
+        val a = JSONObject(raw).optJSONArray("epg_listings") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+    }
+
     /** Fiche d'un film : résumé, année, genre, durée, note. */
     fun movieDetails(vodId: String): MediaDetails? {
         val raw = api("get_vod_info", "&vod_id=$vodId").trim()

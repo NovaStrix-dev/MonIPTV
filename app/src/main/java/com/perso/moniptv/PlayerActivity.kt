@@ -36,6 +36,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.fillMaxWidth
+import android.os.Handler
+import android.os.Looper
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -81,6 +87,16 @@ class PlayerActivity : ComponentActivity() {
     private var groupName: String = ""
     private var channelIndex by mutableStateOf(-1)
     private var channelName by mutableStateOf("")
+    /** #30 : bandeau de la chaîne (nom, position, programme) affiché quelques secondes après un changement de chaîne. */
+    private var bannerVisible by mutableStateOf(false)
+    /** #31 : programme en cours et suivant de la chaîne affichée. */
+    private var programs by mutableStateOf<List<Program>>(emptyList())
+    private var programsNow by mutableStateOf(0L)
+    private val handler = Handler(Looper.getMainLooper())
+    private val hideBanner = Runnable { bannerVisible = false }
+    /** La chaîne choisie n'est chargée qu'après une courte pause, pour pouvoir enchaîner les appuis. */
+    private val loadChannel = Runnable { playCurrentChannel() }
+    private var lastZapAt = 0L
 
     /** Anciennes positions (versions précédentes de l'appli), clé = adresse de lecture. */
     private val legacyPositions by lazy { getSharedPreferences("positions", MODE_PRIVATE) }
@@ -132,6 +148,21 @@ class PlayerActivity : ComponentActivity() {
             AppTheme {
                 Box(Modifier.fillMaxSize()) {
                     AndroidView(factory = { playerView }, modifier = Modifier.fillMaxSize())
+                    // #31 : programme de la chaîne en cours, rechargé à chaque changement de chaîne et chaque minute.
+                    if (live) {
+                        LaunchedEffect(channelIndex, url) {
+                            val ch = channels.getOrNull(channelIndex)
+                            programs = ch?.let { Epg.cached(it.id) } ?: emptyList()
+                            programsNow = System.currentTimeMillis()
+                            if (ch == null) return@LaunchedEffect
+                            delay(300) // zapping rapide : on attend que la chaîne soit choisie
+                            while (true) {
+                                programs = Epg.programs(this@PlayerActivity, ch.id, ch.url)
+                                programsNow = System.currentTimeMillis()
+                                delay(60_000)
+                            }
+                        }
+                    }
                     // Bouton « Apparence des sous-titres », visible avec les commandes du lecteur.
                     if (controlsVisible) {
                         Surface(
@@ -166,19 +197,24 @@ class PlayerActivity : ComponentActivity() {
                     }
                     // Retour à la liste (#20) + titre : nom de la chaîne et position dans la catégorie,
                     // ou titre du film / de la série et de l'épisode.
+                    // #30 : bandeau de chaîne quand on zappe à la télécommande (commandes masquées).
+                    if (live && bannerVisible && !controlsVisible) {
+                        Box(Modifier.align(Alignment.TopStart).padding(16.dp)) {
+                            LiveHeading(channelName, liveSub(), programs, programsNow)
+                        }
+                    }
                     if (controlsVisible) {
                         val heading = if (live) channelName else (meta?.title ?: playTitle)
-                        val sub = when {
-                            live && channels.size > 1 && channelIndex >= 0 -> "$groupName · ${channelIndex + 1}/${channels.size}"
-                            live -> null
-                            else -> meta?.subtitle
-                        }
+                        val sub = if (live) liveSub() else meta?.subtitle
                         Row(
                             Modifier.align(Alignment.TopStart).padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             BackButton { finish() }
-                            if (heading.isNotEmpty()) {
+                            if (live) {
+                                Spacer(Modifier.width(12.dp))
+                                LiveHeading(channelName, sub, programs, programsNow)
+                            } else if (heading.isNotEmpty()) {
                                 Spacer(Modifier.width(12.dp))
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
@@ -221,7 +257,7 @@ class PlayerActivity : ComponentActivity() {
             finish()
             return
         }
-        intent.getStringExtra(EXTRA_TITLE)?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
+        if (live) showBanner() else intent.getStringExtra(EXTRA_TITLE)?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -264,6 +300,7 @@ class PlayerActivity : ComponentActivity() {
      * [HOLD_STEP_INTERVAL_MS]. Commandes visibles et sélection sur un bouton : les flèches servent à se déplacer.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (live && channels.size > 1 && !styleDialog && handleZapKey(event)) return true
         val p = player
         val key = event.keyCode
         if (live || p == null || (key != KeyEvent.KEYCODE_DPAD_LEFT && key != KeyEvent.KEYCODE_DPAD_RIGHT)) {
@@ -294,19 +331,40 @@ class PlayerActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
-    /** Touches télécommande / clavier : chaîne + / chaîne - (et haut / bas quand les commandes sont masquées). */
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (live && channels.size > 1) {
-            when (keyCode) {
-                KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { zap(-1); return true }
-                KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT -> { zap(+1); return true }
-            }
-        }
-        return super.onKeyDown(keyCode, event)
+    /** « groupe · n/N » sous le nom de la chaîne. */
+    private fun liveSub(): String? =
+        if (channels.size > 1 && channelIndex >= 0) "$groupName · ${channelIndex + 1}/${channels.size}" else null
+
+    /**
+     * #30 : changer de chaîne à la télécommande. Haut / bas (toujours, commandes affichées ou non), chaîne +/-,
+     * page +/- et piste suivante/précédente. Touche maintenue : on fait défiler les chaînes, la dernière est lancée au relâchement.
+     * Le sens suit la liste des chaînes : haut = chaîne du dessus, bas = chaîne du dessous.
+     */
+    private fun zapStep(key: Int): Int = when (key) {
+        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> -1
+        KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT -> +1
+        else -> 0
     }
 
-    /** Passe à la chaîne voisine de la même catégorie (on boucle au début / à la fin de la liste). */
-    private fun zap(step: Int) {
+    private fun handleZapKey(event: KeyEvent): Boolean {
+        val step = zapStep(event.keyCode)
+        if (step == 0) return false
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val t = SystemClock.uptimeMillis()
+            if (event.repeatCount == 0 || t - lastZapAt >= ZAP_REPEAT_MS) {
+                lastZapAt = t
+                zap(step, fromRemote = true)
+            }
+        }
+        return true
+    }
+
+    /**
+     * Passe à la chaîne voisine de la même catégorie (on boucle au début / à la fin de la liste).
+     * À la télécommande : bandeau de la chaîne et commandes masquées, pour enchaîner les appuis.
+     * Au toucher (flèches à l'écran) : les commandes restent affichées.
+     */
+    private fun zap(step: Int, fromRemote: Boolean = false) {
         if (channels.size < 2) return
         val start = if (channelIndex < 0) 0 else channelIndex
         val i = Math.floorMod(start + step, channels.size)
@@ -314,13 +372,29 @@ class PlayerActivity : ComponentActivity() {
         channelIndex = i
         channelName = c.name
         url = c.url
-        Diagnostics.log(this, "zapping vers « ${c.name} »")
+        handler.removeCallbacks(loadChannel)
+        handler.postDelayed(loadChannel, ZAP_LOAD_DELAY_MS)
+        if (fromRemote) {
+            playerView.hideController()
+            showBanner()
+        } else {
+            playerView.showController()
+        }
+    }
+
+    private fun showBanner() {
+        bannerVisible = true
+        handler.removeCallbacks(hideBanner)
+        handler.postDelayed(hideBanner, BANNER_MS)
+    }
+
+    private fun playCurrentChannel() {
+        Diagnostics.log(this, "zapping vers « $channelName »")
         player?.let { p ->
             p.setMediaItem(mediaItemFor(url))
             p.playWhenReady = true
             p.prepare()
         }
-        playerView.showController()
     }
 
     override fun onStart() {
@@ -438,6 +512,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun releasePlayer() {
+        handler.removeCallbacks(loadChannel)
         val p = player ?: return
         if (!live) {
             val duration = p.duration.takeIf { it != C.TIME_UNSET } ?: 0L
@@ -463,6 +538,10 @@ class PlayerActivity : ComponentActivity() {
     companion object {
         private const val SEEK_STEP_MS = 10_000L
         private const val HOLD_STEP_INTERVAL_MS = 200L
+        /** #30 : délai avant de lancer la chaîne choisie, intervalle entre deux chaînes touche maintenue, durée du bandeau. */
+        private const val ZAP_LOAD_DELAY_MS = 350L
+        private const val ZAP_REPEAT_MS = 250L
+        private const val BANNER_MS = 5_000L
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_LIVE = "live"
@@ -491,7 +570,7 @@ class PlayerActivity : ComponentActivity() {
          */
         fun startLive(ctx: Context, list: List<Media>, current: Media, group: String) {
             val url = current.url ?: return
-            LivePlaylist.channels = list.mapNotNull { m -> m.url?.let { LiveChannel(m.name, it) } }
+            LivePlaylist.channels = list.mapNotNull { m -> m.url?.let { LiveChannel(m.name, it, m.id) } }
             LivePlaylist.groupName = group
             start(ctx, url, current.name, live = true)
         }
@@ -518,7 +597,7 @@ class PlayerActivity : ComponentActivity() {
 }
 
 /** Une chaîne de la liste de zapping. */
-data class LiveChannel(val name: String, val url: String)
+data class LiveChannel(val name: String, val url: String, val id: String)
 
 /** Chaînes de la catégorie ouverte au moment de lancer le direct (#17). */
 object LivePlaylist {
@@ -554,6 +633,51 @@ private fun BackButton(onClick: () -> Unit) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
             Spacer(Modifier.width(8.dp))
             Text("Retour")
+        }
+    }
+}
+
+/**
+ * Nom de la chaîne, position dans la catégorie et programme en cours / suivant (#30, #31).
+ * Utilisé à côté du bouton Retour et dans le bandeau affiché en zappant.
+ */
+@androidx.compose.runtime.Composable
+private fun LiveHeading(name: String, sub: String?, programs: List<Program>, now: Long) {
+    val current = programs.firstOrNull { it.start <= now && it.end > now }
+    val next = programs.firstOrNull { it.start >= (current?.end ?: now) && it !== current }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = androidx.compose.ui.graphics.Color(0xB3000000),
+        contentColor = androidx.compose.ui.graphics.Color.White,
+        modifier = Modifier.widthIn(max = 460.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+            if (!sub.isNullOrEmpty()) {
+                Text(sub, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+            }
+            if (current != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "${current.hours}  ${current.title}",
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                LinearProgressIndicator(
+                    progress = { current.progress(now) },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).height(3.dp),
+                    trackColor = androidx.compose.ui.graphics.Color(0x55FFFFFF),
+                )
+            }
+            if (next != null) {
+                Text(
+                    "Ensuite ${Program.hhmm(next.start)}  ${next.title}",
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = androidx.compose.ui.graphics.Color(0xCCFFFFFF),
+                )
+            }
         }
     }
 }

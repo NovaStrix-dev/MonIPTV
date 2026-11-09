@@ -4,6 +4,8 @@
 - Identifiants chiffrés sur le téléphone : demandés **une seule fois**.
 - TV en direct, Films, Séries (saisons / épisodes), recherche et filtres par catégorie.
 - **Zapping TV** : pendant une chaîne, les flèches ▲ ▼ à droite (avec les commandes) passent à la chaîne précédente / suivante **sans quitter la catégorie choisie**.
+- **Zapping à la télécommande** (#30) : pendant une chaîne, les flèches **haut / bas** (ou chaîne +/-) passent à la chaîne du dessus / du dessous de la liste, sans afficher les commandes. Un bandeau montre la chaîne, sa position et le programme. Touche maintenue : les chaînes défilent, la dernière est lancée au relâchement.
+- **Programme TV** (#31) : dans la liste des chaînes, sous chaque chaîne, le programme en cours (heure de début, titre, barre d'avancement) et le suivant. Fonctionne avec un compte Xtream (ou un lien M3U get.php d'un serveur Xtream), si le fournisseur donne le guide.
 - **Retour à la liste pendant la lecture** : toucher l'écran pour afficher les commandes, puis le bouton **← Retour** en haut à gauche (à côté du titre) revient à la liste des films, séries ou chaînes. La position est gardée dans « En cours ».
 - **Téléchargement** des films et épisodes, lecture **hors ligne** (onglet « Hors ligne »).
 - Reprise automatique des films/épisodes là où vous vous étiez arrêté.

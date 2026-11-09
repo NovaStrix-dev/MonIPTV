@@ -156,6 +156,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 store.save(acc)
                 withContext(Dispatchers.IO) { CatalogCache.write(ctx, c) }
                 account = acc
+                Epg.reset()
                 catalog = c
             } catch (e: Exception) {
                 error = friendly(e)
@@ -201,6 +202,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         WatchProgress.clear(ctx)
         watching = emptyList()
         account = null
+        Epg.reset()
         catalog = null
         error = null
     }

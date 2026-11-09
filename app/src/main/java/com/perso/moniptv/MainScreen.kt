@@ -905,6 +905,21 @@ fun MovieDialog(vm: AppViewModel, m: Media, onDismiss: () -> Unit) {
 
 @Composable
 fun LiveRow(m: Media, onClick: () -> Unit) {
+    val ctx = LocalContext.current
+    // Programme TV (#31) : en cours + suivant, chargé quand la ligne est affichée, mis à jour chaque minute.
+    var programs by remember(m.id) { mutableStateOf(Epg.cached(m) ?: emptyList()) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(m.id) {
+        if (!Epg.available(ctx)) return@LaunchedEffect
+        if (Epg.cached(m) == null) delay(250) // défilement rapide : pas de requête pour les lignes à peine vues
+        while (true) {
+            programs = Epg.programs(ctx, m)
+            now = System.currentTimeMillis()
+            delay(60_000)
+        }
+    }
+    val current = programs.firstOrNull { it.start <= now && it.end > now }
+    val next = programs.firstOrNull { it.start >= (current?.end ?: now) && it !== current }
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -921,7 +936,30 @@ fun LiveRow(m: Media, onClick: () -> Unit) {
             }
         }
         Spacer(Modifier.width(14.dp))
-        Text(m.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f)) {
+            Text(m.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (current != null) {
+                Text(
+                    "${Program.hhmm(current.start)}  ${current.title}",
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                LinearProgressIndicator(
+                    progress = { current.progress(now) },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).height(2.dp),
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+            }
+            if (next != null) {
+                Text(
+                    "${Program.hhmm(next.start)}  ${next.title}",
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
