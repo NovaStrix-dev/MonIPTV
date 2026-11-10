@@ -100,7 +100,9 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
         if (r.words.isEmpty() || r.movies.isNotEmpty() || key == loggedSearch) return@LaunchedEffect
         delay(1500) // seulement quand la frappe est finie
         loggedSearch = key
-        val sample = catalog.movies.take(3).joinToString(" | ") { visibleChars(it.name) }
+        // De préférence des titres contenant des lettres non latines (sosies cyrilliques ou grecs…).
+        val odd = catalog.movies.asSequence().filter { m -> m.name.any { it.code >= 0x250 } }.take(3).toList()
+        val sample = odd.ifEmpty { catalog.movies.take(3) }.joinToString(" | ") { visibleChars(it.name) }
         Diagnostics.log(
             ctx,
             "recherche « $key » : 0 film sur ${catalog.movies.size}, ${r.series.size} séries sur ${catalog.series.size}" +

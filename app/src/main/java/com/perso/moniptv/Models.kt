@@ -88,8 +88,24 @@ private val searchStrip = Regex("[\\p{Mn}\\p{Me}\\p{Cf}]+")
  * caractères invisibles que certains fournisseurs glissent dans les titres.
  * Réservée à la recherche : [normalizeText] reste inchangée car elle sert aussi à former des identifiants.
  */
-fun searchText(s: String): String =
-    Normalizer.normalize(s, Normalizer.Form.NFKD).replace(searchStrip, "").lowercase()
+fun searchText(s: String): String {
+    val t = Normalizer.normalize(s, Normalizer.Form.NFKD).replace(searchStrip, "").lowercase()
+    // Lettres cyrilliques ou grecques identiques à l'œil aux lettres latines (« а » cyrillique pour « a »…) :
+    // certains fournisseurs en glissent dans les titres de films pour échapper aux robots de détection.
+    // Le titre s'affiche normalement mais « avatar » ne trouvait pas « Аvаtаr » (#29).
+    if (t.none { it.code >= 0x250 }) return t
+    val out = CharArray(t.length)
+    for (i in t.indices) out[i] = lookalikes[t[i]] ?: t[i]
+    return String(out)
+}
+
+/** Sosies des lettres latines (formes minuscules, la comparaison se fait après lowercase()). */
+private val lookalikes: Map<Char, Char> = buildMap {
+    // Cyrillique
+    "аaвbеeкkмmнhоoрpсcтtуyхxіiјjѕsԁdԛqԝwүyһhӏlɑaʏy".chunked(2).forEach { put(it[0], it[1]) }
+    // Grec
+    "αaβbεeζzηhιiκkμmνvοoρpτtυuχxϲcϳj".chunked(2).forEach { put(it[0], it[1]) }
+}
 
 /** Découpe la recherche en mots (sans accents ni majuscules). */
 fun queryWords(q: String): List<String> = searchText(q).split(wordSplit).filter { it.isNotEmpty() }
