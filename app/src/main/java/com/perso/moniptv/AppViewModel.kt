@@ -153,6 +153,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val c = Repository.fetchCatalog(acc)
+                logCatalog(c)
                 store.save(acc)
                 withContext(Dispatchers.IO) { CatalogCache.write(ctx, c) }
                 account = acc
@@ -175,20 +176,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val c = Repository.fetchCatalog(acc, old)
+                logCatalog(c)
                 withContext(Dispatchers.IO) { CatalogCache.write(ctx, c) }
                 catalog = c
-                info = if (old == null) "Catalogue chargé" else {
+                val base = if (old == null) "Catalogue chargé" else {
                     val newMovies = countNew(old.movies, c.movies)
                     val newSeries = countNew(old.series, c.series)
                     if (newMovies + newSeries == 0) "Catalogue à jour, aucun nouveau titre"
                     else "Catalogue à jour : $newMovies nouveau(x) film(s), $newSeries nouvelle(s) série(s)"
                 }
+                val missing = Repository.lastProblems.map { it.substringBefore(" :") }
+                info = if (missing.isEmpty()) base
+                else "$base · non reçu : ${missing.joinToString(", ")} (détail dans le journal)"
             } catch (e: Exception) {
                 error = friendly(e)
             } finally {
                 loading = false
             }
         }
+    }
+
+    /** Note dans le journal de diagnostic ce que le serveur a envoyé (#29). */
+    private fun logCatalog(c: Catalog) {
+        val problems = Repository.lastProblems
+        Diagnostics.log(
+            ctx,
+            "catalogue reçu : ${c.live.size} chaînes, ${c.movies.size} films, ${c.series.size} séries" +
+                if (problems.isEmpty()) "" else " · échecs : ${problems.joinToString(" ; ")}",
+        )
     }
 
     private fun countNew(old: List<Media>, fresh: List<Media>): Int {

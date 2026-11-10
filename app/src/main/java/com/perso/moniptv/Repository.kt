@@ -10,11 +10,19 @@ import java.net.URLEncoder
 object Repository {
 
     /**
+     * Listes que le serveur n'a pas pu fournir à la dernière actualisation (ex. « films : OutOfMemoryError »).
+     * Notées dans le journal de diagnostic par [AppViewModel] (#29) : avant, un échec rendait la liste vide en silence.
+     */
+    @Volatile var lastProblems: List<String> = emptyList()
+        private set
+
+    /**
      * Télécharge le catalogue. [previous] (ancien catalogue) sert à dater les titres
      * que le serveur ne date pas : un titre absent la fois précédente est daté de maintenant,
      * ce qui le fait apparaître dans « Nouveautés ».
      */
     suspend fun fetchCatalog(acc: Account, previous: Catalog? = null): Catalog = withContext(Dispatchers.IO) {
+        lastProblems = emptyList()
         val c = when (acc.type) {
             AccountType.XTREAM -> fetchXtream(acc, previous)
             AccountType.M3U -> {
@@ -68,6 +76,14 @@ object Repository {
                 e is IOException && e !is HttpStatusException -> throw e
                 else -> emptyList()
             }
+        }
+
+        lastProblems = listOf(
+            "catégories TV" to liveCats.await(), "chaînes" to live.await(),
+            "catégories films" to movieCats.await(), "films" to movies.await(),
+            "catégories séries" to seriesCats.await(), "séries" to series.await(),
+        ).mapNotNull { (what, r) ->
+            r.exceptionOrNull()?.let { "$what : ${it.javaClass.simpleName}${it.message?.let { m -> " ($m)" } ?: ""}".take(160) }
         }
 
         val c = Catalog(

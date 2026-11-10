@@ -71,6 +71,15 @@ object Http {
         }
     }
 
+    /** Lit une réponse au fil de l'eau, sans la charger entière en mémoire (grosses listes Xtream, #29). */
+    fun <T> getReader(url: String, block: (java.io.Reader) -> T): T = withRetry {
+        client.newCall(request(url)).execute().use { r ->
+            if (!r.isSuccessful) throw HttpStatusException(r.code)
+            val body = r.body ?: throw IOException("Réponse vide")
+            body.charStream().buffered().use(block)
+        }
+    }
+
     /** Un VPN est-il actif sur le téléphone ? (sert à donner un message d'erreur utile) */
     fun isVpnActive(ctx: Context): Boolean = runCatching {
         val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return false

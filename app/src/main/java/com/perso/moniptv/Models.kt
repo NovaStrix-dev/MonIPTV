@@ -26,7 +26,9 @@ data class Media(
     /** Date d'ajout (secondes depuis 1970), 0 si inconnue. */
     val added: Long = 0,
 ) {
-    val searchKey: String by lazy { normalizeText(name) }
+    val searchKey: String by lazy { searchText(name) }
+    /** Titre sans espaces ni ponctuation : « S.W.A.T » ou « Spider‑Man » se trouvent aussi (#29). */
+    val compactKey: String by lazy { searchKey.replace(nonWord, "") }
     /** Identifiant stable d'un rafraîchissement à l'autre. */
     val stableKey: String get() = url ?: id
 }
@@ -76,12 +78,24 @@ fun normalizeText(s: String): String =
     Normalizer.normalize(s, Normalizer.Form.NFD).replace(diacritics, "").lowercase()
 
 private val wordSplit = Regex("[^\\p{L}\\p{N}]+")
+private val nonWord = wordSplit
+/** Accents, signes combinants et caractères invisibles (espace sans largeur, trait d'union conditionnel…). */
+private val searchStrip = Regex("[\\p{Mn}\\p{Me}\\p{Cf}]+")
+
+/**
+ * Forme de recherche d'un texte (#29) : comme [normalizeText], mais en forme de compatibilité (NFKD),
+ * qui ramène les lettres décoratives (𝐀, Ａ, ᴬ…) et les ligatures (ﬁ) aux lettres ordinaires, et sans les
+ * caractères invisibles que certains fournisseurs glissent dans les titres.
+ * Réservée à la recherche : [normalizeText] reste inchangée car elle sert aussi à former des identifiants.
+ */
+fun searchText(s: String): String =
+    Normalizer.normalize(s, Normalizer.Form.NFKD).replace(searchStrip, "").lowercase()
 
 /** Découpe la recherche en mots (sans accents ni majuscules). */
-fun queryWords(q: String): List<String> = normalizeText(q).split(wordSplit).filter { it.isNotEmpty() }
+fun queryWords(q: String): List<String> = searchText(q).split(wordSplit).filter { it.isNotEmpty() }
 
 /** Vrai si chaque mot recherché apparaît dans le titre (n'importe où, même au milieu). */
-fun Media.matches(words: List<String>): Boolean = words.all { searchKey.contains(it) }
+fun Media.matches(words: List<String>): Boolean = words.all { searchKey.contains(it) || compactKey.contains(it) }
 
 /** Tri du dernier ajouté au premier ; les titres sans date gardent leur ordre, après les titres datés. */
 fun List<Media>.newestFirst(): List<Media> = sortedByDescending { it.added }

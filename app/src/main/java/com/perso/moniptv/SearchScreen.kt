@@ -91,6 +91,23 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
         }
     }
 
+    // #29 : une recherche sans aucun film est notée dans le journal de diagnostic (icône insecte),
+    // avec la taille du catalogue et quelques titres de films, pour comprendre la cause à distance.
+    var loggedSearch by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(results) {
+        val r = results ?: return@LaunchedEffect
+        val key = r.words.joinToString(" ")
+        if (r.words.isEmpty() || r.movies.isNotEmpty() || key == loggedSearch) return@LaunchedEffect
+        delay(1500) // seulement quand la frappe est finie
+        loggedSearch = key
+        val sample = catalog.movies.take(3).joinToString(" | ") { visibleChars(it.name) }
+        Diagnostics.log(
+            ctx,
+            "recherche « $key » : 0 film sur ${catalog.movies.size}, ${r.series.size} séries sur ${catalog.series.size}" +
+                if (sample.isEmpty()) "" else " · ex. films : $sample",
+        )
+    }
+
     val movieCats = remember(catalog) { catalog.movieCats.associate { it.id to it.name } }
     val seriesCats = remember(catalog) { catalog.seriesCats.associate { it.id to it.name } }
     val showMovies = scope != Scope.SERIES
@@ -117,7 +134,10 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
         when {
             words.isEmpty() -> CenterMessage("Tapez un mot contenu dans le titre d'un film ou d'une série.")
             r == null -> CenterMessage("Recherche…", loading = true)
-            total == 0 && r.words == words -> CenterMessage("Aucun film ni série ne contient « ${query.trim()} » dans son titre.")
+            total == 0 && r.words == words -> CenterMessage(
+                "Aucun film ni série ne contient « ${query.trim()} » dans son titre.\n\n" +
+                    "Catalogue : ${catalog.movies.size} films, ${catalog.series.size} séries.",
+            )
             total == 0 -> CenterMessage("Recherche…", loading = true)
             else -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(POSTER_MIN_WIDTH),
@@ -142,3 +162,11 @@ fun SearchScreen(vm: AppViewModel, catalog: Catalog, onOpenSeries: (Media) -> Un
     selectedMovie?.let { m -> MovieDialog(vm, m) { selectedMovie = null } }
 }
 
+
+/** Titre tel quel, avec les caractères inhabituels écrits en code (U+200B…) pour le journal. */
+private fun visibleChars(s: String): String = buildString {
+    s.take(40).forEach { c ->
+        if (c.code in 0x20..0x7E || (Character.isLetter(c) && c.code < 0x250)) append(c)
+        else append("<U+%04X>".format(c.code))
+    }
+}

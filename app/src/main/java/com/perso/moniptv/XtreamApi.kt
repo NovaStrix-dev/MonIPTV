@@ -1,5 +1,7 @@
 package com.perso.moniptv
 
+import android.util.JsonReader
+import android.util.JsonToken
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -25,6 +27,45 @@ class XtreamApi(private val acc: Account) {
         if (action != null) sb.append("&action=").append(action)
         sb.append(extra)
         return Http.get(sb.toString())
+    }
+
+    /**
+     * Grosse liste (chaînes, films, séries) lue au fil de l'eau : chaque élément n'est gardé que le temps
+     * d'en tirer un [Media]. Lire toute la réponse d'un coup (texte + JSONArray) dépassait la mémoire
+     * permise sur un boîtier Android TV avec un gros catalogue de films : la liste des films était alors
+     * abandonnée et remplacée par une liste vide, d'où une recherche sans films (#29).
+     * Seuls les champs simples (texte, nombre) de premier niveau sont lus.
+     */
+    private fun <T> streamList(action: String, map: (Map<String, String>) -> T?): List<T> {
+        val sb = StringBuilder("$base/player_api.php?username=$qUser&password=$qPass&action=$action")
+        return Http.getReader(sb.toString()) { reader ->
+            val r = JsonReader(reader).apply { isLenient = true }
+            val out = ArrayList<T>()
+            if (r.peek() != JsonToken.BEGIN_ARRAY) return@getReader out
+            r.beginArray()
+            val fields = HashMap<String, String>()
+            while (r.hasNext()) {
+                if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); continue }
+                fields.clear()
+                r.beginObject()
+                while (r.hasNext()) {
+                    val key = r.nextName()
+                    when (r.peek()) {
+                        JsonToken.STRING, JsonToken.NUMBER -> {
+                            val v = r.nextString().trim()
+                            if (v.isNotEmpty() && v != "null") fields[key] = v
+                        }
+                        JsonToken.BOOLEAN -> fields[key] = r.nextBoolean().toString()
+                        else -> r.skipValue()
+                    }
+                }
+                r.endObject()
+                map(fields)?.let { out += it }
+            }
+            r.endArray()
+            out.trimToSize()
+            out
+        }
     }
 
     private fun objects(json: String): List<JSONObject> {
@@ -60,45 +101,45 @@ class XtreamApi(private val acc: Account) {
         Category(id, o.str("category_name") ?: id)
     }
 
-    fun live(ext: String): List<Media> = objects(api("get_live_streams")).mapNotNull { o ->
-        val id = o.str("stream_id") ?: return@mapNotNull null
+    fun live(ext: String): List<Media> = streamList("get_live_streams") { o ->
+        val id = o["stream_id"] ?: return@streamList null
         Media(
             id = id,
-            name = o.str("name") ?: "Chaîne $id",
+            name = o["name"] ?: "Chaîne $id",
             type = ContentType.LIVE,
-            categoryId = o.str("category_id") ?: "",
-            icon = o.str("stream_icon"),
+            categoryId = o["category_id"] ?: "",
+            icon = o["stream_icon"],
             url = "$base/live/$pathAuth/$id.$ext",
             ext = ext,
         )
     }
 
-    fun movies(): List<Media> = objects(api("get_vod_streams")).mapNotNull { o ->
-        val id = o.str("stream_id") ?: return@mapNotNull null
-        val ext = o.str("container_extension") ?: "mp4"
+    fun movies(): List<Media> = streamList("get_vod_streams") { o ->
+        val id = o["stream_id"] ?: return@streamList null
+        val ext = o["container_extension"] ?: "mp4"
         Media(
             id = id,
-            name = o.str("name") ?: "Film $id",
+            name = o["name"] ?: "Film $id",
             type = ContentType.MOVIE,
-            categoryId = o.str("category_id") ?: "",
-            icon = o.str("stream_icon"),
+            categoryId = o["category_id"] ?: "",
+            icon = o["stream_icon"],
             url = "$base/movie/$pathAuth/$id.$ext",
             ext = ext,
-            added = o.str("added")?.toLongOrNull() ?: 0,
+            added = o["added"]?.toLongOrNull() ?: 0,
         )
     }
 
-    fun series(): List<Media> = objects(api("get_series")).mapNotNull { o ->
-        val id = o.str("series_id") ?: return@mapNotNull null
+    fun series(): List<Media> = streamList("get_series") { o ->
+        val id = o["series_id"] ?: return@streamList null
         Media(
             id = id,
-            name = o.str("name") ?: "Série $id",
+            name = o["name"] ?: "Série $id",
             type = ContentType.SERIES,
-            categoryId = o.str("category_id") ?: "",
-            icon = o.str("cover"),
+            categoryId = o["category_id"] ?: "",
+            icon = o["cover"],
             url = null,
             ext = null,
-            added = o.str("last_modified")?.toLongOrNull() ?: 0,
+            added = o["last_modified"]?.toLongOrNull() ?: 0,
         )
     }
 
